@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# Tests
+test/
+coverage/
+*.spec.ts
+*.test.ts
+
+# Misc
+.dockerignore
+docker-compose*.yml
+Makefile
