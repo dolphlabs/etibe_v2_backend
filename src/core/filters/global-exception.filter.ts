@@ -5,8 +5,10 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  Injectable,
 } from "@nestjs/common";
-import { FastifyReply, FastifyRequest } from "fastify";
+import { HttpAdapterHost } from "@nestjs/core";
+import { FastifyRequest } from "fastify";
 import { Error as MongooseError } from "mongoose";
 import { ApiResponse, ErrorDetails } from "../../shared/types";
 import { ErrorCode } from "../../shared/enums";
@@ -18,19 +20,23 @@ interface MongoServerError extends Error {
 }
 
 @Catch()
+@Injectable()
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
 
+  constructor(private readonly httpAdapterHost: HttpAdapterHost) {}
+
   catch(exception: unknown, host: ArgumentsHost): void {
+    const { httpAdapter } = this.httpAdapterHost;
     const ctx = host.switchToHttp();
-    const response = ctx.getResponse<FastifyReply>();
     const request = ctx.getRequest<FastifyRequest>();
+    const response = ctx.getResponse();
 
     const { status, errorResponse } = this.handleException(exception, request);
 
     this.logError(exception, request, status);
 
-    response.status(status).send(errorResponse);
+    httpAdapter.reply(response, errorResponse, status);
   }
 
   private handleException(

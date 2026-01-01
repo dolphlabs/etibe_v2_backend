@@ -1,12 +1,13 @@
 import { Injectable, NestMiddleware, Logger } from "@nestjs/common";
-import { FastifyRequest, FastifyReply } from "fastify";
+import { FastifyRequest } from "fastify";
+import { ServerResponse } from "http";
 import { sanitizeObject } from "../../shared/utils";
 
 @Injectable()
 export class XssSanitizeMiddleware implements NestMiddleware {
   private readonly logger = new Logger(XssSanitizeMiddleware.name);
 
-  use(req: FastifyRequest, res: FastifyReply, next: () => void): void {
+  use(req: FastifyRequest, res: ServerResponse, next: () => void): void {
     try {
       if (req.body && typeof req.body === "object") {
         req.body = sanitizeObject(req.body as Record<string, unknown>);
@@ -29,14 +30,14 @@ export class XssSanitizeMiddleware implements NestMiddleware {
 
 @Injectable()
 export class RequestIdMiddleware implements NestMiddleware {
-  use(req: FastifyRequest, res: FastifyReply, next: () => void): void {
+  use(req: FastifyRequest, res: ServerResponse, next: () => void): void {
     const requestId =
       (req.headers["x-request-id"] as string) ||
       `req_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
 
     req.headers["x-request-id"] = requestId;
 
-    res.header("x-request-id", requestId);
+    res.setHeader("x-request-id", requestId);
 
     next();
   }
