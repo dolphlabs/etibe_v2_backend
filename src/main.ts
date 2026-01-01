@@ -8,12 +8,13 @@ import { ValidationPipe, Logger } from "@nestjs/common";
 import helmet from "@fastify/helmet";
 import compress from "@fastify/compress";
 import rateLimit from "@fastify/rate-limit";
+import fastifyCookie from "@fastify/cookie";
 import { Logger as PinoLogger } from "nestjs-pino";
 
 import { AppModule } from "./app.module";
 
 async function bootstrap(): Promise<void> {
-  const logger = new Logger("Bootstrap");
+  const logger = new Logger("Main");
 
   const fastifyAdapter = new FastifyAdapter({
     logger: false,
@@ -31,9 +32,18 @@ async function bootstrap(): Promise<void> {
   );
 
   const configService = app.get(ConfigService);
-  const reflector = app.get(Reflector);
 
   app.useLogger(app.get(PinoLogger));
+
+  await app.register(fastifyCookie, {
+    secret: configService.get<string>("session.secret"),
+    parseOptions: {
+      httpOnly: true,
+      secure: configService.get("app.isProduction"),
+      sameSite: "lax",
+      path: "/",
+    },
+  });
 
   await app.register(helmet, {
     contentSecurityPolicy: {
@@ -65,8 +75,8 @@ async function bootstrap(): Promise<void> {
   await app.register(rateLimit, {
     max: configService.get<number>("security.throttleLimit", 100),
     timeWindow: configService.get<number>("security.throttleTtl", 60000),
-    ban: 3, // Ban after 3 429 responses
-    errorResponseBuilder: (request, context) => ({
+    ban: 3,
+    errorResponseBuilder: (_request, context) => ({
       statusCode: 429,
       error: "Too Many Requests",
       message: `Rate limit exceeded. Please retry after ${Math.round(
@@ -84,10 +94,11 @@ async function bootstrap(): Promise<void> {
       "Authorization",
       "X-Request-Id",
       "X-Api-Key",
+      "X-Device-Id",
     ],
     exposedHeaders: ["X-Request-Id"],
     credentials: true,
-    maxAge: 86400, // 24 hours
+    maxAge: 86400,
   });
 
   app.useGlobalPipes(

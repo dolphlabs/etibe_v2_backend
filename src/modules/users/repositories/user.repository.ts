@@ -32,15 +32,37 @@ export class UserRepository extends BaseRepository<UserDocument> {
     return result as UserDocument | null;
   }
 
-  /**
-   * Checks if an email already exists.
-   *
-   * @param email - The email to check
-   * @returns Boolean indicating if email exists
-   */
+  async findByUsername(
+    username: string,
+    includePassword = false
+  ): Promise<UserDocument | null> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let query: any = this.userModel
+      .findOne({
+        username: username.toLowerCase(),
+        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+      })
+      .lean();
+
+    if (includePassword) {
+      query = query.select("+password");
+    }
+
+    const result = await query.exec();
+    return result as UserDocument | null;
+  }
+
   async emailExists(email: string): Promise<boolean> {
     const result = await this.userModel.exists({
       email: email.toLowerCase(),
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    });
+    return result !== null;
+  }
+
+  async usernameExists(username: string): Promise<boolean> {
+    const result = await this.userModel.exists({
+      username: username.toLowerCase(),
       $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
     });
     return result !== null;
@@ -60,6 +82,7 @@ export class UserRepository extends BaseRepository<UserDocument> {
         { firstName: searchRegex },
         { lastName: searchRegex },
         { email: searchRegex },
+        { username: searchRegex },
       ],
     } as FilterQuery<UserDocument>);
   }
@@ -78,5 +101,14 @@ export class UserRepository extends BaseRepository<UserDocument> {
 
   async verifyUser(userId: string): Promise<UserDocument | null> {
     return this.update(userId, { isVerified: true } as Partial<UserDocument>);
+  }
+
+  async linkNearWallet(
+    userId: string,
+    walletAddress: string
+  ): Promise<UserDocument | null> {
+    return this.update(userId, {
+      nearWalletAddress: walletAddress,
+    } as Partial<UserDocument>);
   }
 }

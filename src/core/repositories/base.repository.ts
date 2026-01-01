@@ -27,7 +27,7 @@ export abstract class BaseRepository<T extends Document> {
     options?: Pick<QueryOptions, "select" | "populate">
   ): Promise<T | null> {
     const filter = {
-      _id: new Types.ObjectId(id.toString()),
+      _id: new Types.ObjectId(id?.toString()),
       $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
     };
 

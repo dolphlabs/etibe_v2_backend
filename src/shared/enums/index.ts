@@ -34,9 +34,14 @@ export enum ErrorCode {
 
   INTERNAL_ERROR = "INTERNAL_ERROR",
   SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE",
+
+  SESSION_EXPIRED = "SESSION_EXPIRED",
+  DEVICE_MISMATCH = "DEVICE_MISMATCH",
 }
 
 export enum SortDirection {
   ASC = 1,
   DESC = -1,
 }
+
+export * from "./circle.enums";

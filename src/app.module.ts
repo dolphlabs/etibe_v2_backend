@@ -5,6 +5,7 @@ import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
 import { CacheModule } from "@nestjs/cache-manager";
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { LoggerModule } from "nestjs-pino";
+import { EventEmitterModule } from "@nestjs/event-emitter";
 import { redisStore } from "cache-manager-ioredis-yet";
 
 import {
@@ -14,6 +15,10 @@ import {
   redisConfig,
   securityConfig,
   loggingConfig,
+  nearConfig,
+  sessionConfig,
+  resendConfig,
+  vaultConfig,
 } from "./config";
 import {
   GlobalExceptionFilter,
@@ -21,8 +26,12 @@ import {
   LoggingInterceptor,
   XssSanitizeMiddleware,
   RequestIdMiddleware,
+  AuthGuard,
 } from "./core";
 import { UsersModule } from "./modules/users";
+import { AuthModule } from "./modules/auth";
+import { CirclesModule } from "./modules/circles";
+import { BlockchainModule } from "./modules/blockchain";
 
 @Module({
   imports: [
@@ -35,9 +44,23 @@ import { UsersModule } from "./modules/users";
         redisConfig,
         securityConfig,
         loggingConfig,
+        nearConfig,
+        sessionConfig,
+        resendConfig,
+        vaultConfig,
       ],
       envFilePath: [".env.local", ".env"],
       expandVariables: true,
+    }),
+
+    EventEmitterModule.forRoot({
+      wildcard: true,
+      delimiter: ".",
+      newListener: false,
+      removeListener: false,
+      maxListeners: 10,
+      verboseMemoryLeak: true,
+      ignoreErrors: false,
     }),
 
     LoggerModule.forRootAsync({
@@ -102,7 +125,11 @@ import { UsersModule } from "./modules/users";
       }),
     }),
 
+    // Feature Modules
     UsersModule,
+    AuthModule,
+    CirclesModule,
+    BlockchainModule,
   ],
   providers: [
     {
@@ -113,6 +140,11 @@ import { UsersModule } from "./modules/users";
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+
+    {
+      provide: APP_GUARD,
+      useClass: AuthGuard,
     },
 
     {

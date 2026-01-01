@@ -1,7 +1,3 @@
-/**
- * Standard API response envelope structure.
- * All API responses follow this consistent format.
- */
 export interface ApiResponse<T> {
   success: boolean;
   data: T;
@@ -9,9 +5,6 @@ export interface ApiResponse<T> {
   error?: ErrorDetails;
 }
 
-/**
- * Metadata for paginated responses.
- */
 export interface ResponseMeta {
   timestamp?: string;
   path?: string;
@@ -19,9 +12,6 @@ export interface ResponseMeta {
   requestId?: string;
 }
 
-/**
- * Pagination metadata structure.
- */
 export interface PaginationMeta {
   page: number;
   limit: number;
@@ -31,9 +21,6 @@ export interface PaginationMeta {
   hasPreviousPage: boolean;
 }
 
-/**
- * Error details structure for failed responses.
- */
 export interface ErrorDetails {
   code: string;
   message: string;
@@ -41,17 +28,11 @@ export interface ErrorDetails {
   stack?: string;
 }
 
-/**
- * Paginated result wrapper for repository queries.
- */
 export interface PaginatedResult<T> {
   data: T[];
   pagination: PaginationMeta;
 }
 
-/**
- * Base query options for repository methods.
- */
 export interface QueryOptions {
   page?: number;
   limit?: number;
@@ -60,28 +41,21 @@ export interface QueryOptions {
   populate?: string | string[] | PopulateOptions[];
 }
 
-/**
- * Populate options for Mongoose queries.
- */
 export interface PopulateOptions {
   path: string;
   select?: string;
   populate?: PopulateOptions[];
 }
 
-/**
- * Soft delete interface for documents.
- */
 export interface SoftDeletable {
   deletedAt?: Date | null;
   isDeleted: boolean;
 }
 
-/**
- * Base document interface with timestamps.
- */
 export interface BaseDocument extends SoftDeletable {
   _id: string;
   createdAt: Date;
   updatedAt: Date;
 }
+
+export * from "./session.types";
