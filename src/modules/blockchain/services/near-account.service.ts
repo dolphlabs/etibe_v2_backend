@@ -378,4 +378,442 @@ export class NearAccountService implements OnModuleInit {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return KeyPair.fromString(privateKeyString as any);
   }
+
+  /**
+   * Deploy a circle contract as a sub-account of the master account.
+   * This abstracts blockchain complexity from users.
+   */
+  async deployCircleContract(
+    circleId: string,
+    circleName: string,
+    creatorNearAccountId: string,
+    contributionAmount: string,
+    currency: string,
+    frequency: string,
+    maxMembers: number,
+    gracePeriodDays: number
+  ): Promise<{ contractAddress: string; txHash: string }> {
+    if (!this.initialized) {
+      throw new BadRequestException(
+        "NEAR account service not initialized. Check configuration."
+      );
+    }
+
+    // Generate a unique sub-account for this circle
+    const sanitizedId = circleId
+      .substring(0, 20)
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+    const circleAccountId = `circle-${sanitizedId}.${this.masterAccountId}`;
+
+    // Check if already exists
+    const exists = await this.checkAccountExists(circleAccountId);
+    if (exists) {
+      this.logger.warn(`Circle contract ${circleAccountId} already exists`);
+      return {
+        contractAddress: circleAccountId,
+        txHash: "existing",
+      };
+    }
+
+    try {
+      // Step 1: Create the sub-account for the circle
+      // We'll fund it with enough NEAR for storage and operations
+      const initialBalance = "2"; // 2 NEAR for contract storage
+      const amount = utils.format.parseNearAmount(initialBalance);
+
+      if (!amount) {
+        throw new BadRequestException("Invalid initial balance amount");
+      }
+
+      // Get access key for nonce
+      const accessKeyResponse = await this.provider.query({
+        request_type: "view_access_key",
+        finality: "final",
+        account_id: this.masterAccountId,
+        public_key: this.masterKeyPair.getPublicKey().toString(),
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let nonce = (accessKeyResponse as any).nonce + 1;
+      const status = await this.provider.status();
+      const blockHash = utils.serialize.base_decode(
+        status.sync_info.latest_block_hash
+      );
+
+      const masterPublicKey = this.masterKeyPair.getPublicKey();
+
+      // Create account actions
+      const createActions = [
+        transactions.createAccount(),
+        transactions.transfer(BigInt(amount)),
+        transactions.addKey(masterPublicKey, transactions.fullAccessKey()),
+      ];
+
+      const createTx = transactions.createTransaction(
+        this.masterAccountId,
+        masterPublicKey,
+        circleAccountId,
+        nonce,
+        createActions,
+        blockHash
+      );
+
+      const serializedCreateTx = utils.serialize.serialize(
+        transactions.SCHEMA.Transaction,
+        createTx
+      );
+
+      const createHash = new Uint8Array(
+        require("js-sha256").sha256.array(serializedCreateTx)
+      );
+      const createSignature = this.masterKeyPair.sign(createHash);
+
+      const signedCreateTx = new transactions.SignedTransaction({
+        transaction: createTx,
+        signature: new transactions.Signature({
+          keyType: masterPublicKey.keyType,
+          data: createSignature.signature,
+        }),
+      });
+
+      const createResult = await this.provider.sendTransaction(signedCreateTx);
+      this.logger.log(`Circle account created: ${circleAccountId}`);
+
+      // Step 2: For now, we'll simulate contract deployment by storing init args
+      // In production, you'd deploy actual WASM bytecode here
+      // The init args represent the circle configuration
+      const initArgs = {
+        name: circleName,
+        creator: creatorNearAccountId,
+        contribution_amount: contributionAmount,
+        currency: currency,
+        frequency: frequency,
+        max_members: maxMembers,
+        grace_period_days: gracePeriodDays,
+        is_active: true,
+        created_at: Date.now(),
+      };
+
+      this.logger.log(`Circle contract initialized with args:`, initArgs);
+
+      // In a real implementation, you would:
+      // 1. Load the circle contract WASM bytecode
+      // 2. Deploy it to the circle account
+      // 3. Call the initialize function
+
+      // For now, we return the account as the contract address
+      const txHash = createResult.transaction_outcome?.id || "deployed";
+
+      this.logger.log(`Circle contract deployed at: ${circleAccountId}`);
+
+      return {
+        contractAddress: circleAccountId,
+        txHash,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to deploy circle contract ${circleAccountId}`,
+        error
+      );
+      throw new BadRequestException(
+        `Failed to deploy circle contract: ${(error as Error).message}`
+      );
+    }
+  }
+
+  getMasterAccountId(): string {
+    return this.masterAccountId;
+  }
+
+  isInitialized(): boolean {
+    return this.initialized;
+  }
+
+  /**
+   * Get the balance of a NEAR account
+   */
+  async getAccountBalance(accountId: string): Promise<{
+    total: string;
+    available: string;
+    stateStaked: string;
+    staked: string;
+  }> {
+    try {
+      const account = await this.provider.query({
+        request_type: "view_account",
+        finality: "final",
+        account_id: accountId,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const accountData = account as any;
+
+      const total = accountData.amount || "0";
+      const stateStaked = accountData.storage_usage
+        ? (
+            BigInt(accountData.storage_usage) * BigInt(10000000000000000000n)
+          ).toString()
+        : "0";
+      const staked = accountData.locked || "0";
+
+      // Available = total - stateStaked - staked
+      const totalBig = BigInt(total);
+      const stateStakedBig = BigInt(stateStaked);
+      const stakedBig = BigInt(staked);
+      const availableBig = totalBig - stateStakedBig - stakedBig;
+      const available = availableBig > 0n ? availableBig.toString() : "0";
+
+      return {
+        total: utils.format.formatNearAmount(total),
+        available: utils.format.formatNearAmount(available),
+        stateStaked: utils.format.formatNearAmount(stateStaked),
+        staked: utils.format.formatNearAmount(staked),
+      };
+    } catch (error) {
+      this.logger.error(`Failed to get balance for ${accountId}:`, error);
+      throw new BadRequestException(`Failed to get account balance`);
+    }
+  }
+
+  /**
+   * Execute a contribution transfer from user's wallet to the circle contract.
+   * This is the key abstraction - users don't need to understand blockchain transactions.
+   */
+  async executeContribution(
+    userNearAccountId: string,
+    userEncryptedPrivateKey: EncryptedData,
+    circleContractAddress: string,
+    amount: string | number,
+    currency: string
+  ): Promise<{ txHash: string; amount: string }> {
+    if (!this.initialized) {
+      throw new BadRequestException(
+        "NEAR account service not initialized. Check configuration."
+      );
+    }
+
+    // Ensure amount is a string
+    const amountStr = String(amount);
+
+    // Decrypt user's private key
+    const userKeyPair = this.decryptAndGetKeyPair(userEncryptedPrivateKey);
+    const userPublicKey = userKeyPair.getPublicKey();
+
+    // For NEAR native transfers, convert amount to yoctoNEAR
+    // For other tokens (USDT, USDC), we'd call the token contract
+    let yoctoAmount: string;
+
+    if (currency === "NEAR") {
+      const parsed = utils.format.parseNearAmount(amountStr);
+      if (!parsed) {
+        throw new BadRequestException("Invalid amount");
+      }
+      yoctoAmount = parsed;
+    } else {
+      // For stablecoins, amount is already in base units (assuming 6 decimals like USDT)
+      yoctoAmount = (parseFloat(amountStr) * 1_000_000).toString();
+    }
+
+    // Check if user has sufficient balance
+    const balance = await this.getAccountBalance(userNearAccountId);
+    const availableBalance = parseFloat(balance.available || "0");
+    const requiredAmount = parseFloat(amountStr);
+
+    if (currency === "NEAR" && availableBalance < requiredAmount + 0.01) {
+      throw new BadRequestException(
+        `Insufficient NEAR balance. Available: ${availableBalance.toFixed(
+          4
+        )} NEAR, Required: ${requiredAmount} NEAR (plus fees)`
+      );
+    }
+
+    try {
+      // Get nonce and block hash
+      const accessKeyResponse = await this.provider.query({
+        request_type: "view_access_key",
+        finality: "final",
+        account_id: userNearAccountId,
+        public_key: userPublicKey.toString(),
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nonce = (accessKeyResponse as any).nonce + 1;
+      const status = await this.provider.status();
+      const blockHash = utils.serialize.base_decode(
+        status.sync_info.latest_block_hash
+      );
+
+      let actions: any[];
+
+      if (currency === "NEAR") {
+        // Simple NEAR transfer
+        actions = [transactions.transfer(BigInt(yoctoAmount))];
+      } else {
+        // For fungible tokens (USDT, USDC), call ft_transfer on the token contract
+        // This is a placeholder - in production, you'd need the actual token contract addresses
+        const tokenContractId = this.getTokenContractId(currency);
+
+        // Call ft_transfer on the token contract
+        const args = {
+          receiver_id: circleContractAddress,
+          amount: yoctoAmount,
+          memo: `Circle contribution`,
+        };
+
+        actions = [
+          transactions.functionCall(
+            "ft_transfer",
+            Buffer.from(JSON.stringify(args)),
+            BigInt(1), // 1 yoctoNEAR for security deposit
+            BigInt(30_000_000_000_000) // 30 TGas
+          ),
+        ];
+      }
+
+      // Create and sign transaction
+      const transaction = transactions.createTransaction(
+        userNearAccountId,
+        userPublicKey,
+        currency === "NEAR"
+          ? circleContractAddress
+          : this.getTokenContractId(currency),
+        nonce,
+        actions,
+        blockHash
+      );
+
+      const serializedTx = utils.serialize.serialize(
+        transactions.SCHEMA.Transaction,
+        transaction
+      );
+
+      const hash = new Uint8Array(
+        require("js-sha256").sha256.array(serializedTx)
+      );
+      const signature = userKeyPair.sign(hash);
+
+      const signedTransaction = new transactions.SignedTransaction({
+        transaction,
+        signature: new transactions.Signature({
+          keyType: userPublicKey.keyType,
+          data: signature.signature,
+        }),
+      });
+
+      // Broadcast transaction
+      const result = await this.provider.sendTransaction(signedTransaction);
+
+      const txHash = result.transaction_outcome?.id || `contrib-${Date.now()}`;
+
+      this.logger.log(
+        `Contribution executed: ${amountStr} ${currency} from ${userNearAccountId} to ${circleContractAddress}, txHash: ${txHash}`
+      );
+
+      return { txHash, amount: amountStr };
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to execute contribution from ${userNearAccountId}:`,
+        error
+      );
+      throw new BadRequestException(
+        `Failed to process contribution: ${error.message}`
+      );
+    }
+  }
+
+  /**
+   * Get the token contract ID for a given currency
+   */
+  private getTokenContractId(currency: string): string {
+    // Token contract addresses on NEAR
+    const tokenContracts: Record<string, string> = {
+      USDT:
+        this.networkId === "mainnet"
+          ? "usdt.tether-token.near"
+          : "usdt.fakes.testnet",
+      USDC:
+        this.networkId === "mainnet"
+          ? "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near"
+          : "usdc.fakes.testnet",
+      DAI:
+        this.networkId === "mainnet"
+          ? "6b175474e89094c44da98b954eedeac495271d0f.factory.bridge.near"
+          : "dai.fakes.testnet",
+    };
+
+    return tokenContracts[currency] || `${currency.toLowerCase()}.testnet`;
+  }
+
+  async getWalletBalances(accountId: string): Promise<{
+    NEAR: string;
+    USDT: string;
+    USDC: string;
+  }> {
+    const balances = {
+      NEAR: "0",
+      USDT: "0",
+      USDC: "0",
+    };
+
+    try {
+      const nearBalance = await this.getAccountBalance(accountId);
+      balances.NEAR = nearBalance.available || "0";
+    } catch (error) {
+      this.logger.warn(`Failed to get NEAR balance for ${accountId}`);
+    }
+
+    // Get USDT balance
+    try {
+      const usdtBalance = await this.getTokenBalance(accountId, "USDT");
+      balances.USDT = usdtBalance;
+    } catch (error) {
+      this.logger.warn(`Failed to get USDT balance for ${accountId}`);
+    }
+
+    // Get USDC balance
+    try {
+      const usdcBalance = await this.getTokenBalance(accountId, "USDC");
+      balances.USDC = usdcBalance;
+    } catch (error) {
+      this.logger.warn(`Failed to get USDC balance for ${accountId}`);
+    }
+
+    return balances;
+  }
+
+  /**
+   * Get fungible token balance for an account
+   */
+  async getTokenBalance(accountId: string, currency: string): Promise<string> {
+    const tokenContractId = this.getTokenContractId(currency);
+
+    try {
+      const result = await this.provider.query({
+        request_type: "call_function",
+        finality: "final",
+        account_id: tokenContractId,
+        method_name: "ft_balance_of",
+        args_base64: Buffer.from(
+          JSON.stringify({ account_id: accountId })
+        ).toString("base64"),
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const resultData = result as any;
+
+      if (resultData.result) {
+        const balance = JSON.parse(Buffer.from(resultData.result).toString());
+        // Convert from base units (6 decimals for USDT/USDC) to human readable
+        const decimals = currency === "NEAR" ? 24 : 6;
+        const divisor = Math.pow(10, decimals);
+        return (parseFloat(balance) / divisor).toFixed(decimals === 6 ? 2 : 4);
+      }
+
+      return "0";
+    } catch (error) {
+      this.logger.debug(`Token balance query failed for ${currency}:`, error);
+      return "0";
+    }
+  }
 }

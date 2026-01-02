@@ -83,7 +83,7 @@ export class Transaction {
   currency!: Currency;
 
   @Prop({
-    min: 1,
+    min: 0,
   })
   round?: number;
 

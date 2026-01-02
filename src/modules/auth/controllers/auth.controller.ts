@@ -25,6 +25,7 @@ import {
   SessionMetadata,
 } from "../../../shared/types/session.types";
 import { UserService } from "@modules/users";
+import { NearAccountService } from "../../blockchain/services/near-account.service";
 
 const AUTH_COOKIE_NAME = "etibe_auth";
 const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -35,7 +36,8 @@ export class AuthController {
 
   constructor(
     private readonly authService: AuthService,
-    private readonly userService: UserService
+    private readonly userService: UserService,
+    private readonly nearAccountService: NearAccountService
   ) {}
 
   @Public()
@@ -181,17 +183,57 @@ export class AuthController {
 
     const result = await this.userService.findById(user.id);
 
+    let walletBalance = result.walletBalance || {
+      NEAR: "0",
+      USDT: "0",
+      USDC: "0",
+    };
+
+    if (result.nearAccountId) {
+      try {
+        const onChainBalances = await this.nearAccountService.getWalletBalances(
+          result.nearAccountId
+        );
+
+        walletBalance = {
+          NEAR: onChainBalances.NEAR,
+          USDT: onChainBalances.USDT,
+          USDC: onChainBalances.USDC,
+        };
+
+        this.userService
+          .update(user.id, {
+            walletBalance: {
+              ...walletBalance,
+              lastUpdatedAt: new Date(),
+            },
+          } as any)
+          .catch((err) =>
+            this.logger.warn("Failed to update wallet balance:", err)
+          );
+      } catch (error) {
+        this.logger.warn(
+          `Failed to fetch on-chain balances for ${result.nearAccountId}`
+        );
+      }
+    }
+
     return {
       user: {
         id: result._id,
         email: result.email,
+        username: result.username,
         firstName: result.firstName,
         lastName: result.lastName,
+        avatar: result.avatar,
         createdAt: result.createdAt,
         updatedAt: result.updatedAt,
         onboardingCompleted: result.onboardingCompleted,
+        isVerified: result.isVerified,
+        isEmailVerified: result.isEmailVerified,
         deletedAt: result.deletedAt,
         nearAccountId: result.nearAccountId,
+        walletBalance,
       },
     };
   }

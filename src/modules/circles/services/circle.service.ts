@@ -14,6 +14,7 @@ import { nanoid } from "nanoid";
 import { CircleRepository } from "../repositories/circle.repository";
 import { TransactionRepository } from "../repositories/transaction.repository";
 import { NearService } from "../../blockchain/services/near.service";
+import { NearAccountService } from "../../blockchain/services/near-account.service";
 import { CircleDocument, TransactionDocument } from "../schemas";
 import {
   CreateCircleDto,
@@ -48,6 +49,7 @@ export class CircleService {
     private readonly transactionRepository: TransactionRepository,
     private readonly userRepository: UserRepository,
     private readonly nearService: NearService,
+    private readonly nearAccountService: NearAccountService,
     private readonly circleMailService: CircleMailService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache
   ) {}
@@ -92,7 +94,7 @@ export class CircleService {
       startDate,
       nextPayoutDate,
       inviteCode,
-      inviteLink: `${process.env.APP_URL}/join/${inviteCode}`,
+      inviteLink: `https://etibe.app/join/${inviteCode}`,
       isPrivate: dto.isPrivate ?? false,
       members: [
         {
@@ -124,12 +126,14 @@ export class CircleService {
 
   async activateCircle(
     circleId: string,
-    contractAddress: string,
     userId: string
-  ): Promise<CircleDocument> {
+  ): Promise<{
+    circle: CircleDocument;
+    contractAddress: string;
+    txHash: string;
+  }> {
     const circle = await this.getCircleById(circleId);
 
-    // Security: Only the creator can activate
     if (circle.creatorId.toString() !== userId) {
       throw new ForbiddenException("Only the circle creator can activate it");
     }
@@ -140,33 +144,28 @@ export class CircleService {
       );
     }
 
-    // Verify the NEAR contract exists and is valid
-    const isValid = await this.nearService.isValidCircleContract(
-      contractAddress
-    );
-
-    if (!isValid) {
-      throw new BadRequestException(
-        "Invalid contract address. Ensure the contract is deployed and initialized correctly."
-      );
-    }
-
-    // Verify the creator is the contract owner
-    const contractState = await this.nearService.viewCircleState(
-      contractAddress
-    );
-
-    if (!contractState) {
-      throw new BadRequestException("Could not read contract state");
-    }
-
     const creator = await this.userRepository.findById(userId);
-    if (contractState.creator !== creator?.nearAccountId) {
+    if (!creator?.nearAccountId) {
       throw new BadRequestException(
-        "Contract owner does not match circle creator"
+        "Creator must have a NEAR account to activate the circle"
       );
     }
 
+    this.logger.log(`Deploying circle contract for: ${circle.name}`);
+
+    const { contractAddress, txHash } =
+      await this.nearAccountService.deployCircleContract(
+        circleId,
+        circle.name,
+        creator.nearAccountId,
+        circle.contributionSettings.amount,
+        circle.contributionSettings.currency,
+        circle.contributionSettings.frequency,
+        circle.maxMembers,
+        circle.contributionSettings.gracePeriodDays
+      );
+
+    // Update circle with contract address and activate
     const updated = await this.circleRepository.update(circleId, {
       contractAddress,
       status: CircleStatus.RECRUITING,
@@ -177,12 +176,16 @@ export class CircleService {
     }
 
     this.logger.log(
-      `Circle ${circleId} activated with contract ${contractAddress}`
+      `Circle ${circleId} activated with contract ${contractAddress}, txHash: ${txHash}`
     );
 
     await this.invalidateCircleCache(circleId);
 
-    return updated;
+    return {
+      circle: updated,
+      contractAddress,
+      txHash,
+    };
   }
 
   async getCircleById(circleId: string): Promise<CircleDocument> {
@@ -464,6 +467,111 @@ export class CircleService {
     return updatedCircle;
   }
 
+  async makeContribution(
+    circleId: string,
+    userId: string
+  ): Promise<TransactionDocument> {
+    const circle = await this.getCircleById(circleId);
+
+    if (
+      circle.status !== CircleStatus.ACTIVE &&
+      circle.status !== CircleStatus.RECRUITING
+    ) {
+      throw new BadRequestException("Circle is not accepting contributions");
+    }
+
+    const user = await this.userRepository.findById(userId, {
+      select: ["+nearEncryptedPrivateKey"],
+    });
+
+    if (!user?.nearAccountId) {
+      throw new BadRequestException("You need a NEAR wallet to contribute");
+    }
+
+    if (!user.nearEncryptedPrivateKey) {
+      throw new BadRequestException(
+        "Your wallet is not set up for automatic contributions. Please contact support."
+      );
+    }
+
+    const isMember = circle.members.some(
+      (m) => m.userId.toString() === userId && m.status === "ACTIVE"
+    );
+    if (!isMember) {
+      throw new BadRequestException("You must be a member to contribute");
+    }
+
+    const alreadyContributed =
+      await this.transactionRepository.hasUserContributedThisRound(
+        userId,
+        circleId,
+        circle.currentRound
+      );
+    if (alreadyContributed) {
+      throw new ConflictException("You have already contributed this round");
+    }
+
+    const amount = circle.contributionSettings.amount;
+    const currency = circle.contributionSettings.currency;
+
+    if (!circle.contractAddress) {
+      throw new BadRequestException(
+        "Circle contract not deployed. Please activate the circle first."
+      );
+    }
+
+    this.logger.log(
+      `Executing contribution: ${amount} ${currency} from ${user.nearAccountId} for circle ${circle.name}`
+    );
+
+    // Execute the actual blockchain transfer
+    const { txHash } = await this.nearAccountService.executeContribution(
+      user.nearAccountId,
+      user.nearEncryptedPrivateKey,
+      circle.contractAddress,
+      amount,
+      currency
+    );
+
+    // Create transaction record
+    const transaction = await this.transactionRepository.create({
+      type: TransactionType.CONTRIBUTION,
+      status: TransactionStatus.CONFIRMED,
+      userId: new Types.ObjectId(userId),
+      circleId: new Types.ObjectId(circleId),
+      amount,
+      currency,
+      round: circle.currentRound,
+      transactionHash: txHash,
+      nearAccountId: user.nearAccountId,
+      confirmedAt: new Date(),
+    } as Partial<TransactionDocument>);
+
+    // Update circle total contributed
+    await this.circleRepository.incrementTotalContributed(circleId, amount);
+
+    // Send contribution email
+    await this.circleMailService.sendContributionReceivedEmail(
+      user.email,
+      user.firstName,
+      circle.name,
+      amount,
+      currency,
+      circle.currentRound
+    );
+
+    this.logger.log(
+      `Contribution completed: ${amount} ${currency} to ${circle.name} by ${user.firstName}, txHash: ${txHash}`
+    );
+
+    await this.invalidateCircleCache(circleId);
+
+    return transaction;
+  }
+
+  /**
+   * @deprecated Use makeContribution instead - this method requires manual transaction submission
+   */
   async recordContribution(
     circleId: string,
     userId: string,

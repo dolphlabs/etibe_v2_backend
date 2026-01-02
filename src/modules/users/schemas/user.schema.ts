@@ -19,6 +19,23 @@ export class EncryptedKey {
 
 const EncryptedKeySchema = SchemaFactory.createForClass(EncryptedKey);
 
+@Schema({ _id: false })
+export class WalletBalance {
+  @Prop({ default: "0" })
+  NEAR!: string;
+
+  @Prop({ default: "0" })
+  USDT!: string;
+
+  @Prop({ default: "0" })
+  USDC!: string;
+
+  @Prop()
+  lastUpdatedAt?: Date;
+}
+
+const WalletBalanceSchema = SchemaFactory.createForClass(WalletBalance);
+
 export interface UserDocument extends Document {
   _id: Types.ObjectId;
   email: string;
@@ -31,6 +48,7 @@ export interface UserDocument extends Document {
   nearAccountId?: string;
   nearPublicKey?: string;
   nearEncryptedPrivateKey?: EncryptedKey;
+  walletBalance?: WalletBalance;
   isActive: boolean;
   isVerified: boolean;
   isEmailVerified: boolean;
@@ -132,6 +150,12 @@ export class User {
     select: false,
   })
   nearEncryptedPrivateKey?: EncryptedKey;
+
+  @Prop({
+    type: WalletBalanceSchema,
+    default: () => ({ NEAR: "0", USDT: "0", USDC: "0" }),
+  })
+  walletBalance?: WalletBalance;
 
   @Prop({
     default: true,
