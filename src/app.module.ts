@@ -27,6 +27,7 @@ import {
   XssSanitizeMiddleware,
   RequestIdMiddleware,
   AuthGuard,
+  CoreModule,
 } from "./core";
 import { UsersModule } from "./modules/users";
 import { AuthModule } from "./modules/auth";
@@ -103,14 +104,29 @@ import { BlockchainModule } from "./modules/blockchain";
     CacheModule.registerAsync({
       isGlobal: true,
       inject: [ConfigService],
-      useFactory: async (configService: ConfigService) => ({
-        store: await redisStore({
-          host: configService.get<string>("redis.host", "localhost"),
-          port: configService.get<number>("redis.port", 6379),
-          password: configService.get<string>("redis.password") || undefined,
-          ttl: configService.get<number>("redis.ttl", 3600) * 1000,
-        }),
-      }),
+      useFactory: async (configService: ConfigService) => {
+        const host = configService.get<string>("redis.host", "localhost");
+        const port = configService.get<number>("redis.port", 6379);
+        const password =
+          configService.get<string>("redis.password") || undefined;
+        const ttl = configService.get<number>("redis.ttl", 3600) * 1000;
+
+        console.log(`[CACHE] Initializing Redis store: ${host}:${port}`);
+
+        try {
+          const store = await redisStore({
+            host,
+            port,
+            password,
+            ttl,
+          });
+          console.log(`[CACHE] Redis store initialized successfully`);
+          return { store, ttl };
+        } catch (error) {
+          console.error(`[CACHE] Failed to initialize Redis store:`, error);
+          throw error;
+        }
+      },
     }),
 
     ThrottlerModule.forRootAsync({
@@ -124,6 +140,8 @@ import { BlockchainModule } from "./modules/blockchain";
         ],
       }),
     }),
+
+    CoreModule,
 
     // Feature Modules
     UsersModule,

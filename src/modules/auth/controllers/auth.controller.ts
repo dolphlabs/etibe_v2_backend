@@ -24,6 +24,7 @@ import {
   AuthenticatedUser,
   SessionMetadata,
 } from "../../../shared/types/session.types";
+import { UserService } from "@modules/users";
 
 const AUTH_COOKIE_NAME = "etibe_auth";
 const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -32,7 +33,10 @@ const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly userService: UserService
+  ) {}
 
   @Public()
   @Post("register")
@@ -175,8 +179,20 @@ export class AuthController {
       throw new UnauthorizedException("Not authenticated");
     }
 
+    const result = await this.userService.findById(user.id);
+
     return {
-      user: this.sanitizeUser(user),
+      user: {
+        id: result._id,
+        email: result.email,
+        firstName: result.firstName,
+        lastName: result.lastName,
+        createdAt: result.createdAt,
+        updatedAt: result.updatedAt,
+        onboardingCompleted: result.onboardingCompleted,
+        deletedAt: result.deletedAt,
+        nearAccountId: result.nearAccountId,
+      },
     };
   }
 
@@ -291,7 +307,7 @@ export class AuthController {
       fullName: user.fullName,
       avatar: user.avatar,
       isVerified: user.isVerified,
-      nearWalletAddress: user.nearWalletAddress,
+      nearAccountId: user.nearAccountId,
     };
   }
 

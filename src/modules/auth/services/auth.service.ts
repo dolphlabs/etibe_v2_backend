@@ -323,7 +323,7 @@ export class AuthService {
       fullName: `${user.firstName} ${user.lastName}`,
       avatar: user.avatar,
       isVerified: user.isVerified,
-      nearWalletAddress: user.nearAccountId,
+      nearAccountId: user.nearAccountId,
       sessionId,
       deviceId,
     };

@@ -5,3 +5,5 @@ export * from "./repositories";
 export * from "./pipes";
 export * from "./guards";
 export * from "./middleware";
+export * from "./services";
+export * from "./core.module";

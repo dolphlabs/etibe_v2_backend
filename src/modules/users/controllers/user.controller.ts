@@ -21,12 +21,6 @@ import { Public } from "../../../core/decorators";
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
-  @Post()
-  @HttpCode(HttpStatus.CREATED)
-  async create(@Body() createUserDto: CreateUserDto): Promise<UserDocument> {
-    return this.userService.create(createUserDto);
-  }
-
   @Get()
   @Public()
   async findAll(

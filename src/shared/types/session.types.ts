@@ -46,7 +46,7 @@ export interface AuthenticatedUser {
   fullName: string;
   avatar?: string;
   isVerified: boolean;
-  nearWalletAddress?: string;
+  nearAccountId?: string;
   sessionId: string;
   deviceId: string;
 }

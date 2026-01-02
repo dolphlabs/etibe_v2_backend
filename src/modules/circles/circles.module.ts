@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { Module, forwardRef } from "@nestjs/common";
 import { MongooseModule } from "@nestjs/mongoose";
 import {
   Circle,
@@ -9,8 +9,11 @@ import {
   InvitationSchema,
 } from "./schemas";
 import { CircleRepository, TransactionRepository } from "./repositories";
-import { CircleService } from "./services";
+import { CircleService, CircleMailService } from "./services";
+import { CircleController } from "./controllers";
+import { VerifiedUserGuard } from "./guards";
 import { BlockchainModule } from "../blockchain";
+import { UsersModule } from "../users";
 
 @Module({
   imports: [
@@ -20,8 +23,22 @@ import { BlockchainModule } from "../blockchain";
       { name: Invitation.name, schema: InvitationSchema },
     ]),
     BlockchainModule,
+    forwardRef(() => UsersModule),
   ],
-  providers: [CircleRepository, TransactionRepository, CircleService],
-  exports: [CircleService, CircleRepository, TransactionRepository],
+  controllers: [CircleController],
+  providers: [
+    CircleRepository,
+    TransactionRepository,
+    CircleService,
+    CircleMailService,
+    VerifiedUserGuard,
+  ],
+  exports: [
+    CircleService,
+    CircleMailService,
+    CircleRepository,
+    TransactionRepository,
+    VerifiedUserGuard,
+  ],
 })
 export class CirclesModule {}

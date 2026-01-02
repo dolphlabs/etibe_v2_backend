@@ -1,14 +1,12 @@
-import { Injectable, Logger, Inject } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
-import { CACHE_MANAGER } from "@nestjs/cache-manager";
-import { Cache } from "cache-manager";
 import { nanoid } from "nanoid";
 import {
   EtibeSession,
   SessionMetadata,
-  SessionCookiePayload,
 } from "../../../shared/types/session.types";
-import { APP_CONSTANTS, CACHE_TTL } from "../../../shared/constants";
+import { APP_CONSTANTS } from "../../../shared/constants";
+import { RedisService } from "../../../core/services/redis.service";
 
 const SESSION_PREFIX = "session:";
 const USER_SESSIONS_PREFIX = "user_sessions:";
@@ -29,7 +27,7 @@ export class SessionService {
 
   constructor(
     private readonly jwtService: JwtService,
-    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache
+    private readonly redisService: RedisService
   ) {
     this.sessionTtlMs =
       (APP_CONSTANTS.SESSION_TTL_DAYS || 7) * 24 * 60 * 60 * 1000;
@@ -59,16 +57,26 @@ export class SessionService {
 
     // Store session in Redis
     const sessionKey = `${SESSION_PREFIX}${sessionId}`;
-    await this.cacheManager.set(sessionKey, session, this.sessionTtlMs);
+    try {
+      await this.redisService.set(sessionKey, session, this.sessionTtlMs);
 
-    // Track session for user
+      // Verify session was stored
+      const storedSession = await this.redisService.get(sessionKey);
+      if (!storedSession) {
+        this.logger.error(`[SESSION] Failed to store session in Redis!`);
+      } else {
+        this.logger.log(`[SESSION] Session stored successfully`);
+      }
+    } catch (error) {
+      this.logger.error(`[SESSION] Redis error during session storage:`, error);
+      throw error;
+    }
+
     await this.trackUserSession(userId, sessionId);
 
-    // Map device to session
     const deviceKey = `${DEVICE_SESSION_PREFIX}${userId}:${deviceId}`;
-    await this.cacheManager.set(deviceKey, sessionId, this.sessionTtlMs);
+    await this.redisService.set(deviceKey, sessionId, this.sessionTtlMs);
 
-    // Generate JWT token containing session info
     const payload: JwtSessionPayload = {
       sid: sessionId,
       uid: userId,
@@ -76,8 +84,6 @@ export class SessionService {
     };
 
     const token = this.jwtService.sign(payload);
-
-    this.logger.log(`Session created for user ${userId} on device ${deviceId}`);
 
     return { session, token };
   }
@@ -96,7 +102,7 @@ export class SessionService {
 
   async getSession(sessionId: string): Promise<EtibeSession | null> {
     const sessionKey = `${SESSION_PREFIX}${sessionId}`;
-    const session = await this.cacheManager.get<EtibeSession>(sessionKey);
+    const session = await this.redisService.get<EtibeSession>(sessionKey);
     return session || null;
   }
 
@@ -155,7 +161,7 @@ export class SessionService {
       session.lastActive = new Date();
       const sessionKey = `${SESSION_PREFIX}${sessionId}`;
       const ttlRemaining = new Date(session.expiresAt).getTime() - Date.now();
-      await this.cacheManager.set(
+      await this.redisService.set(
         sessionKey,
         session,
         Math.max(ttlRemaining, 0)
@@ -167,16 +173,15 @@ export class SessionService {
     const session = await this.getSession(sessionId);
 
     if (session) {
-      session.isValid = false;
       const sessionKey = `${SESSION_PREFIX}${sessionId}`;
-      await this.cacheManager.del(sessionKey);
+      await this.redisService.del(sessionKey);
 
       // Remove from user sessions
       await this.removeUserSession(session.userId, sessionId);
 
       // Remove device mapping
       const deviceKey = `${DEVICE_SESSION_PREFIX}${session.userId}:${session.deviceId}`;
-      await this.cacheManager.del(deviceKey);
+      await this.redisService.del(deviceKey);
 
       this.logger.log(`Session invalidated: ${sessionId}`);
     }
@@ -184,7 +189,7 @@ export class SessionService {
 
   async invalidateAllUserSessions(userId: string): Promise<number> {
     const userSessionsKey = `${USER_SESSIONS_PREFIX}${userId}`;
-    const sessionIds = await this.cacheManager.get<string[]>(userSessionsKey);
+    const sessionIds = await this.redisService.get<string[]>(userSessionsKey);
 
     if (!sessionIds || sessionIds.length === 0) {
       return 0;
@@ -194,7 +199,7 @@ export class SessionService {
       await this.invalidateSession(sessionId);
     }
 
-    await this.cacheManager.del(userSessionsKey);
+    await this.redisService.del(userSessionsKey);
 
     this.logger.log(`All sessions invalidated for user ${userId}`);
     return sessionIds.length;
@@ -202,7 +207,7 @@ export class SessionService {
 
   async getUserSessions(userId: string): Promise<EtibeSession[]> {
     const userSessionsKey = `${USER_SESSIONS_PREFIX}${userId}`;
-    const sessionIds = await this.cacheManager.get<string[]>(userSessionsKey);
+    const sessionIds = await this.redisService.get<string[]>(userSessionsKey);
 
     if (!sessionIds) {
       return [];
@@ -226,11 +231,11 @@ export class SessionService {
   ): Promise<void> {
     const userSessionsKey = `${USER_SESSIONS_PREFIX}${userId}`;
     const existingSessions =
-      (await this.cacheManager.get<string[]>(userSessionsKey)) || [];
+      (await this.redisService.get<string[]>(userSessionsKey)) || [];
 
     if (!existingSessions.includes(sessionId)) {
       existingSessions.push(sessionId);
-      await this.cacheManager.set(
+      await this.redisService.set(
         userSessionsKey,
         existingSessions,
         this.sessionTtlMs
@@ -244,10 +249,10 @@ export class SessionService {
   ): Promise<void> {
     const userSessionsKey = `${USER_SESSIONS_PREFIX}${userId}`;
     const existingSessions =
-      (await this.cacheManager.get<string[]>(userSessionsKey)) || [];
+      (await this.redisService.get<string[]>(userSessionsKey)) || [];
 
     const updatedSessions = existingSessions.filter((id) => id !== sessionId);
-    await this.cacheManager.set(
+    await this.redisService.set(
       userSessionsKey,
       updatedSessions,
       this.sessionTtlMs
@@ -259,7 +264,7 @@ export class SessionService {
     deviceId: string
   ): Promise<void> {
     const deviceKey = `${DEVICE_SESSION_PREFIX}${userId}:${deviceId}`;
-    const existingSessionId = await this.cacheManager.get<string>(deviceKey);
+    const existingSessionId = await this.redisService.get<string>(deviceKey);
 
     if (existingSessionId) {
       await this.invalidateSession(existingSessionId);

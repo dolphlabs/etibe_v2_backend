@@ -3,20 +3,22 @@ import {
   CanActivate,
   ExecutionContext,
   UnauthorizedException,
-  Inject,
   Logger,
   Optional,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { JwtService } from "@nestjs/jwt";
-import { CACHE_MANAGER } from "@nestjs/cache-manager";
-import { Cache } from "cache-manager";
+import { InjectConnection } from "@nestjs/mongoose";
+import { Connection, Types } from "mongoose";
 import { FastifyRequest } from "fastify";
 import { IS_PUBLIC_KEY } from "../decorators";
 import { AuthenticatedUser } from "../../shared/types/session.types";
+import { RedisService } from "../services/redis.service";
 
 const AUTH_COOKIE_NAME = "etibe_auth";
 const SESSION_PREFIX = "session:";
+const USER_CACHE_PREFIX = "auth_user:";
+const USER_CACHE_TTL = 300000; // 5 minutes
 
 interface JwtSessionPayload {
   sid: string;
@@ -45,7 +47,8 @@ export class AuthGuard implements CanActivate {
   constructor(
     protected readonly reflector: Reflector,
     @Optional() private readonly jwtService: JwtService,
-    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache
+    private readonly redisService: RedisService,
+    @InjectConnection() private readonly connection: Connection
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -84,18 +87,17 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException("Session expired or invalid");
     }
 
-    request.user = {
-      _id: payload.uid as unknown as import("mongoose").Types.ObjectId,
-      id: payload.uid,
-      email: "",
-      username: "",
-      firstName: "",
-      lastName: "",
-      fullName: "",
-      isVerified: false,
-      sessionId: payload.sid,
-      deviceId: payload.did,
-    };
+    const user = await this.getUserData(payload.uid, payload.sid, payload.did);
+
+    if (!user) {
+      throw new UnauthorizedException("User not found");
+    }
+
+    if (!user.isActive) {
+      throw new UnauthorizedException("Account is deactivated");
+    }
+
+    request.user = user;
 
     return true;
   }
@@ -130,7 +132,7 @@ export class AuthGuard implements CanActivate {
     deviceId: string
   ): Promise<EtibeSession | null> {
     const sessionKey = `${SESSION_PREFIX}${sessionId}`;
-    const session = await this.cacheManager.get<EtibeSession>(sessionKey);
+    const session = await this.redisService.get<EtibeSession>(sessionKey);
 
     if (!session) {
       this.logger.debug(`Session not found: ${sessionId}`);
@@ -153,5 +155,53 @@ export class AuthGuard implements CanActivate {
     }
 
     return session;
+  }
+
+  private async getUserData(
+    userId: string,
+    sessionId: string,
+    deviceId: string
+  ): Promise<(AuthenticatedUser & { isActive: boolean }) | null> {
+    const cacheKey = `${USER_CACHE_PREFIX}${userId}`;
+    const cached = await this.redisService.get<any>(cacheKey);
+
+    let userData: any;
+
+    if (cached) {
+      userData = cached;
+    } else {
+      try {
+        const userDoc = await this.connection
+          .collection("users")
+          .findOne({ _id: new Types.ObjectId(userId) });
+
+        if (!userDoc) {
+          return null;
+        }
+
+        userData = userDoc;
+
+        await this.redisService.set(cacheKey, userData, USER_CACHE_TTL);
+      } catch (error) {
+        this.logger.error(`Failed to fetch user ${userId}:`, error);
+        return null;
+      }
+    }
+
+    return {
+      _id: userData._id,
+      id: userData._id.toString(),
+      email: userData.email,
+      username: userData.username,
+      firstName: userData.firstName,
+      lastName: userData.lastName,
+      fullName: `${userData.firstName} ${userData.lastName}`,
+      avatar: userData.avatar,
+      isVerified: userData.isVerified || userData.isEmailVerified,
+      nearAccountId: userData.nearAccountId,
+      sessionId,
+      deviceId,
+      isActive: userData.isActive !== false,
+    };
   }
 }
