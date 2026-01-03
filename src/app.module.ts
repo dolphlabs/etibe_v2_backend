@@ -178,6 +178,8 @@ import { BlockchainModule } from "./modules/blockchain";
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(RequestIdMiddleware, XssSanitizeMiddleware).forRoutes("*");
+    consumer
+      .apply(RequestIdMiddleware, XssSanitizeMiddleware)
+      .forRoutes("{*path}");
   }
 }

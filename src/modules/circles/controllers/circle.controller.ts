@@ -214,6 +214,54 @@ export class CircleController {
     return { data: this.mapCircleToResponse(circle) };
   }
 
+  @Post(":id/start")
+  @HttpCode(HttpStatus.OK)
+  async startCircle(
+    @Param("id") circleId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<{
+    data: CircleResponseDto;
+    payoutsScheduled: boolean;
+    message: string;
+  }> {
+    const result = await this.circleService.startCircle(circleId, user.id);
+
+    this.logger.log(
+      `Circle ${circleId} started by ${user.id}, payouts scheduled: ${result.payoutsScheduled}`
+    );
+
+    return {
+      message:
+        "Circle is now ACTIVE! Automated payouts have been scheduled for all members.",
+      data: this.mapCircleToResponse(result.circle),
+      payoutsScheduled: result.payoutsScheduled,
+    };
+  }
+
+  @Get(":id/payout-schedule")
+  async getPayoutSchedule(@Param("id") circleId: string): Promise<{
+    data: {
+      circleId: string;
+      circleName: string;
+      status: string;
+      currentRound: number;
+      totalRounds: number;
+      payoutSchedule: {
+        round: number;
+        recipientUserId: string;
+        recipientName: string;
+        estimatedPayoutDate: Date;
+        hasReceived: boolean;
+        payoutDate?: Date;
+        transactionHash?: string;
+      }[];
+    };
+  }> {
+    const schedule = await this.circleService.getPayoutSchedule(circleId);
+
+    return { data: schedule };
+  }
+
   private mapCircleToResponse(circle: any): CircleResponseDto {
     const activeMembers =
       circle.members?.filter((m: any) => m.status === "ACTIVE") || [];

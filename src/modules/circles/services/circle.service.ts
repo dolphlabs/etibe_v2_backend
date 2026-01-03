@@ -9,6 +9,7 @@ import {
 } from "@nestjs/common";
 import { CACHE_MANAGER } from "@nestjs/cache-manager";
 import { Cache } from "cache-manager";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { Types } from "mongoose";
 import { nanoid } from "nanoid";
 import { CircleRepository } from "../repositories/circle.repository";
@@ -39,6 +40,7 @@ import {
 } from "../../../shared/constants";
 import { UserRepository } from "../../users/repositories";
 import { CircleMailService } from "./circle-mail.service";
+import { CIRCLE_EVENTS } from "../constants/payout.constants";
 
 @Injectable()
 export class CircleService {
@@ -51,6 +53,7 @@ export class CircleService {
     private readonly nearService: NearService,
     private readonly nearAccountService: NearAccountService,
     private readonly circleMailService: CircleMailService,
+    private readonly eventEmitter: EventEmitter2,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache
   ) {}
 
@@ -950,5 +953,171 @@ export class CircleService {
 
   private async invalidateUserCirclesCache(userId: string): Promise<void> {
     await this.cacheManager.del(`${CACHE_KEYS.USER_CIRCLES}:${userId}:all`);
+  }
+
+  async startCircle(
+    circleId: string,
+    userId: string
+  ): Promise<{
+    circle: CircleDocument;
+    payoutsScheduled: boolean;
+  }> {
+    const circle = await this.getCircleById(circleId);
+
+    if (circle.creatorId.toString() !== userId) {
+      throw new ForbiddenException("Only the circle creator can start it");
+    }
+
+    if (circle.status !== CircleStatus.RECRUITING) {
+      throw new BadRequestException(
+        `Circle must be in RECRUITING status to start. Current status: ${circle.status}`
+      );
+    }
+
+    const activeMembers = circle.members.filter((m) => m.status === "ACTIVE");
+    if (activeMembers.length < 2) {
+      throw new BadRequestException(
+        "Circle must have at least 2 active members to start"
+      );
+    }
+
+    if (!circle.contractAddress) {
+      throw new BadRequestException(
+        "Circle contract not deployed. Please activate the circle first."
+      );
+    }
+
+    const updatedCircle = await this.circleRepository.update(circleId, {
+      status: CircleStatus.ACTIVE,
+      currentRound: 1,
+      startDate: new Date(),
+      totalRounds: activeMembers.length,
+    } as Partial<CircleDocument>);
+
+    if (!updatedCircle) {
+      throw new BadRequestException("Failed to start circle");
+    }
+
+    this.logger.log(
+      `Circle ${circleId} started with ${activeMembers.length} members`
+    );
+
+    this.eventEmitter.emit(CIRCLE_EVENTS.CIRCLE_ACTIVATED, {
+      circleId: circleId,
+      activatedBy: userId,
+      activatedAt: new Date().toISOString(),
+      contractAddress: circle.contractAddress,
+    });
+
+    // Notify all members that the circle has started
+    for (const member of activeMembers) {
+      try {
+        const memberUser = await this.userRepository.findById(
+          member.userId.toString()
+        );
+        if (memberUser) {
+          await this.circleMailService.sendCircleStartedEmail(
+            memberUser.email,
+            memberUser.firstName,
+            circle.name,
+            activeMembers.length,
+            circle.contributionSettings.amount,
+            circle.contributionSettings.currency
+          );
+        }
+      } catch (error: any) {
+        this.logger.warn(
+          `Failed to send circle started email to member ${member.userId}: ${error.message}`
+        );
+      }
+    }
+
+    await this.invalidateCircleCache(circleId);
+
+    return {
+      circle: updatedCircle,
+      payoutsScheduled: true,
+    };
+  }
+
+  async getPayoutSchedule(circleId: string): Promise<{
+    circleId: string;
+    circleName: string;
+    status: CircleStatus;
+    currentRound: number;
+    totalRounds: number;
+    payoutSchedule: {
+      round: number;
+      recipientUserId: string;
+      recipientName: string;
+      estimatedPayoutDate: Date;
+      hasReceived: boolean;
+      payoutDate?: Date;
+      transactionHash?: string;
+    }[];
+  }> {
+    const circle = await this.getCircleById(circleId);
+    const activeMembers = circle.members
+      .filter((m) => m.status === "ACTIVE")
+      .sort((a, b) => a.position - b.position);
+
+    const payoutSchedule = await Promise.all(
+      activeMembers.map(async (member, index) => {
+        const user = await this.userRepository.findById(
+          member.userId.toString()
+        );
+        const estimatedDate = this.calculatePayoutDateForRound(
+          circle.startDate,
+          index + 1,
+          circle.contributionSettings.frequency
+        );
+
+        return {
+          round: index + 1,
+          recipientUserId: member.userId.toString(),
+          recipientName: user
+            ? `${user.firstName} ${user.lastName}`
+            : "Unknown",
+          estimatedPayoutDate: estimatedDate,
+          hasReceived: member.hasReceivedPayout,
+          payoutDate: member.payoutDate,
+          transactionHash: member.payoutTransactionHash,
+        };
+      })
+    );
+
+    return {
+      circleId: circle._id.toString(),
+      circleName: circle.name,
+      status: circle.status,
+      currentRound: circle.currentRound,
+      totalRounds: circle.totalRounds,
+      payoutSchedule,
+    };
+  }
+
+  private calculatePayoutDateForRound(
+    startDate: Date,
+    round: number,
+    frequency: PayoutFrequency
+  ): Date {
+    const date = new Date(startDate);
+
+    for (let i = 0; i < round; i++) {
+      switch (frequency) {
+        case PayoutFrequency.WEEKLY:
+          date.setDate(date.getDate() + 7);
+          break;
+        case PayoutFrequency.BI_WEEKLY:
+          date.setDate(date.getDate() + 14);
+          break;
+        case PayoutFrequency.MONTHLY:
+        default:
+          date.setMonth(date.getMonth() + 1);
+          break;
+      }
+    }
+
+    return date;
   }
 }

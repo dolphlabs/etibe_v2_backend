@@ -441,4 +441,129 @@ export class CircleMailService {
 </html>
     `;
   }
+
+  async sendCircleStartedEmail(
+    email: string,
+    firstName: string,
+    circleName: string,
+    memberCount: number,
+    contributionAmount: string,
+    currency: string
+  ): Promise<void> {
+    const html = this.getCircleStartedTemplate()
+      .replace(/{{firstName}}/g, firstName)
+      .replace(/{{circleName}}/g, circleName)
+      .replace(/{{memberCount}}/g, memberCount.toString())
+      .replace(/{{contributionAmount}}/g, contributionAmount)
+      .replace(/{{currency}}/g, currency)
+      .replace(/{{year}}/g, new Date().getFullYear().toString());
+
+    try {
+      await this.resend.emails.send({
+        from: `${this.fromName} <${this.fromEmail}>`,
+        to: email,
+        subject: `🚀 "${circleName}" is now ACTIVE - contributions begin!`,
+        html,
+      });
+      this.logger.log(`Circle started email sent to ${email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send circle started email`, error);
+    }
+  }
+
+  private getCircleStartedTemplate(): string {
+    return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Circle Started - Etibé</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  </style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #F9FAFB; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td style="padding: 40px 20px;">
+        <table role="presentation" style="max-width: 560px; margin: 0 auto; background-color: #FFFFFF; border-radius: 16px; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);">
+          <tr>
+            <td style="padding: 40px 40px 24px; text-align: center;">
+              <div style="font-size: 32px; font-weight: 700; color: #4CAF50; letter-spacing: -0.5px;">Etibé</div>
+              <div style="font-size: 13px; color: #666666; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase;">Decentralized Social Savings</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 0 40px 24px;">
+              <h1 style="margin: 0 0 12px; font-size: 24px; font-weight: 600; color: #111827; line-height: 1.3;">
+                Your Circle is Now Active! 🚀
+              </h1>
+              <p style="margin: 0; font-size: 16px; color: #111827; line-height: 1.6;">
+                Hi {{firstName}}, great news! <strong>"{{circleName}}"</strong> has officially started. All members can now begin making contributions.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 0 40px 32px;">
+              <div style="background: linear-gradient(135deg, #4CAF50 0%, #45A049 100%); border-radius: 12px; padding: 24px;">
+                <table style="width: 100%;">
+                  <tr>
+                    <td style="text-align: center; padding: 8px;">
+                      <div style="font-size: 12px; color: rgba(255,255,255,0.8); text-transform: uppercase; letter-spacing: 1px;">Members</div>
+                      <div style="font-size: 28px; font-weight: 700; color: #FFFFFF;">{{memberCount}}</div>
+                    </td>
+                    <td style="text-align: center; padding: 8px; border-left: 1px solid rgba(255,255,255,0.3);">
+                      <div style="font-size: 12px; color: rgba(255,255,255,0.8); text-transform: uppercase; letter-spacing: 1px;">Contribution</div>
+                      <div style="font-size: 28px; font-weight: 700; color: #FFFFFF;">{{contributionAmount}} {{currency}}</div>
+                    </td>
+                  </tr>
+                </table>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 0 40px 24px;">
+              <div style="background-color: #FFF8E1; border-radius: 8px; padding: 16px; border-left: 4px solid #FFC107;">
+                <p style="margin: 0; font-size: 14px; color: #111827;">
+                  ⏰ <strong>Action Required:</strong> Make sure to complete your contribution before the deadline to avoid penalties.
+                </p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 0 40px 32px; text-align: center;">
+              <a href="https://etibe.app/circles" style="display: inline-block; background-color: #4CAF50; color: #FFFFFF; text-decoration: none; padding: 16px 32px; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);">Make Contribution</a>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 0 40px 24px;">
+              <div style="background-color: #E8F5E9; border-radius: 8px; padding: 16px; border-left: 4px solid #4CAF50;">
+                <p style="margin: 0; font-size: 14px; color: #2E7D32;">
+                  🔒 <strong>Payouts are automated</strong> - the smart contract will automatically distribute funds to each member on their scheduled payout date.
+                </p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 24px 40px; border-top: 1px solid #EEEEEE; background-color: #FAFAFA; border-radius: 0 0 16px 16px;">
+              <p style="margin: 0 0 8px; font-size: 12px; color: #9E9E9E; text-align: center; line-height: 1.6;">
+                Sent with ❤️ from Etibé
+              </p>
+              <p style="margin: 0 0 8px; font-size: 12px; color: #9E9E9E; text-align: center; line-height: 1.6;">
+                © {{year}} Etibé. Built on NEAR Protocol.
+              </p>
+              <p style="margin: 0; font-size: 11px; color: #BDBDBD; text-align: center; line-height: 1.6;">
+                Lagos, Nigeria
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+    `;
+  }
 }
