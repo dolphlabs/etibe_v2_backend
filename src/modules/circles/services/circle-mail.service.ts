@@ -198,7 +198,7 @@ export class CircleMailService {
           <tr>
             <td style="padding: 40px 40px 24px; text-align: center;">
               <div style="font-size: 32px; font-weight: 700; color: #4CAF50; letter-spacing: -0.5px;">Etibé</div>
-              <div style="font-size: 13px; color: #666666; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase;">Decentralized Social Savings</div>
+              <div style="font-size: 13px; color: #666666; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase;">decentralised Social Savings</div>
             </td>
           </tr>
           <tr>
@@ -236,7 +236,7 @@ export class CircleMailService {
           <tr>
             <td style="padding: 24px 40px; border-top: 1px solid #EEEEEE;">
               <p style="margin: 0; font-size: 12px; color: #9E9E9E; text-align: center; line-height: 1.6;">
-                © {{year}} Etibé. Built on NEAR Protocol.<br>Powered by decentralized trust.
+                © {{year}} Etibé. Built on NEAR Protocol.<br>Powered by decentralised trust.
               </p>
             </td>
           </tr>
@@ -269,7 +269,7 @@ export class CircleMailService {
           <tr>
             <td style="padding: 40px 40px 24px; text-align: center;">
               <div style="font-size: 32px; font-weight: 700; color: #4CAF50; letter-spacing: -0.5px;">Etibé</div>
-              <div style="font-size: 13px; color: #666666; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase;">Decentralized Social Savings</div>
+              <div style="font-size: 13px; color: #666666; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase;">decentralised Social Savings</div>
             </td>
           </tr>
           <tr>
@@ -278,7 +278,7 @@ export class CircleMailService {
                 You're Invited! 💌
               </h1>
               <p style="margin: 0; font-size: 16px; color: #424242; line-height: 1.6;">
-                <strong>{{inviterName}}</strong> has invited you to join the savings circle <strong>"{{circleName}}"</strong> on Etibé - the decentralized social savings platform.
+                <strong>{{inviterName}}</strong> has invited you to join the savings circle <strong>"{{circleName}}"</strong> on Etibé - the decentralised social savings platform.
               </p>
             </td>
           </tr>
@@ -299,7 +299,7 @@ export class CircleMailService {
             <td style="padding: 0 40px 32px;">
               <div style="background-color: #FFF8E1; border-radius: 8px; padding: 16px; border-left: 4px solid #FFC107;">
                 <p style="margin: 0; font-size: 14px; color: #424242;">
-                  <strong>What is Etibé?</strong> A decentralized platform where trusted groups save together. Each member contributes regularly, and each takes turns receiving the pooled funds.
+                  <strong>What is Etibé?</strong> A decentralised platform where trusted groups save together. Each member contributes regularly, and each takes turns receiving the pooled funds.
                 </p>
               </div>
             </td>
@@ -307,7 +307,7 @@ export class CircleMailService {
           <tr>
             <td style="padding: 24px 40px; border-top: 1px solid #EEEEEE;">
               <p style="margin: 0; font-size: 12px; color: #9E9E9E; text-align: center; line-height: 1.6;">
-                © {{year}} Etibé. Built on NEAR Protocol.<br>Powered by decentralized trust.
+                © {{year}} Etibé. Built on NEAR Protocol.<br>Powered by decentralised trust.
               </p>
             </td>
           </tr>
@@ -429,7 +429,7 @@ export class CircleMailService {
           <tr>
             <td style="padding: 24px 40px; border-top: 1px solid #EEEEEE;">
               <p style="margin: 0; font-size: 12px; color: #9E9E9E; text-align: center; line-height: 1.6;">
-                © {{year}} Etibé. Built on NEAR Protocol.<br>Powered by decentralized trust.
+                © {{year}} Etibé. Built on NEAR Protocol.<br>Powered by decentralised trust.
               </p>
             </td>
           </tr>
@@ -491,7 +491,7 @@ export class CircleMailService {
           <tr>
             <td style="padding: 40px 40px 24px; text-align: center;">
               <div style="font-size: 32px; font-weight: 700; color: #4CAF50; letter-spacing: -0.5px;">Etibé</div>
-              <div style="font-size: 13px; color: #666666; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase;">Decentralized Social Savings</div>
+              <div style="font-size: 13px; color: #666666; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase;">decentralised Social Savings</div>
             </td>
           </tr>
           <tr>

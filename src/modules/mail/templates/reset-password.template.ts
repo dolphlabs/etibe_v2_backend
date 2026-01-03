@@ -21,7 +21,7 @@ export const resetPasswordHbsTemplate = `
                 Etibé
               </div>
               <div style="font-size: 13px; color: #666666; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase;">
-                Decentralized Social Savings
+                decentralised Social Savings
               </div>
             </td>
           </tr>
@@ -150,7 +150,7 @@ export function renderResetPasswordEmail(
                 Etibé
               </div>
               <div style="font-size: 13px; color: #666666; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase;">
-                Decentralized Social Savings
+                decentralised Social Savings
               </div>
             </td>
           </tr>

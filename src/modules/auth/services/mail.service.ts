@@ -243,7 +243,7 @@ export class MailService {
                 Etibé
               </div>
               <div style="font-size: 13px; color: #666666; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase;">
-                Decentralized Social Savings
+                decentralised Social Savings
               </div>
             </td>
           </tr>
@@ -389,7 +389,7 @@ export class MailService {
                 Etibé
               </div>
               <div style="font-size: 13px; color: #666666; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase;">
-                Decentralized Social Savings
+                decentralised Social Savings
               </div>
             </td>
           </tr>
@@ -546,7 +546,7 @@ export class MailService {
                 Etibé
               </div>
               <div style="font-size: 13px; color: #666666; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase;">
-                Decentralized Social Savings
+                decentralised Social Savings
               </div>
             </td>
           </tr>
@@ -587,7 +587,7 @@ export class MailService {
               <ul style="margin: 0; padding-left: 20px; font-size: 15px; color: #111827; line-height: 1.8;">
                 <li>Join or create a savings circle with trusted friends</li>
                 <li>Set your contribution schedule and amount</li>
-                <li>Build collective wealth through transparent, decentralized savings</li>
+                <li>Build collective wealth through transparent, decentralised savings</li>
               </ul>
             </td>
           </tr>
