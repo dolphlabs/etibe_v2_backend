@@ -5,6 +5,8 @@ import {
   BadRequestException,
   Logger,
 } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { randomBytes, createHash } from "crypto";
 import * as argon2 from "argon2";
 import { UserRepository } from "../../users/repositories";
 import { SessionService } from "./session.service";
@@ -18,18 +20,37 @@ import {
   EtibeSession,
 } from "../../../shared/types/session.types";
 import { RegisterDto, LoginDto, VerifyEmailDto } from "../dto/auth.dto";
+import {
+  ForgotPasswordDto,
+  ResetPasswordDto,
+  ChangePasswordDto,
+} from "../dto/recovery.dto";
+
+// Password reset token expiry time (1 hour)
+const RESET_TOKEN_EXPIRY_MS = 60 * 60 * 1000;
+
+// Timed response delay to prevent email enumeration (200-500ms random)
+const TIMED_RESPONSE_MIN_MS = 200;
+const TIMED_RESPONSE_MAX_MS = 500;
 
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private readonly appUrl: string;
 
   constructor(
     private readonly userRepository: UserRepository,
     private readonly sessionService: SessionService,
     private readonly mailService: MailService,
     private readonly nearAccountService: NearAccountService,
-    private readonly vaultService: VaultService
-  ) {}
+    private readonly vaultService: VaultService,
+    private readonly configService: ConfigService
+  ) {
+    this.appUrl = this.configService.get<string>(
+      "app.appUrl",
+      "http://localhost:3000"
+    );
+  }
 
   async register(
     registerDto: RegisterDto,
@@ -327,5 +348,176 @@ export class AuthService {
       sessionId,
       deviceId,
     };
+  }
+
+  async forgotPassword(
+    dto: ForgotPasswordDto,
+    metadata: SessionMetadata
+  ): Promise<{ message: string }> {
+    const startTime = Date.now();
+
+    try {
+      const user = await this.userRepository.findByEmail(
+        dto.email.toLowerCase()
+      );
+
+      if (user && user.isActive) {
+        const plainToken = this.generateResetToken();
+        const hashedToken = this.hashResetToken(plainToken);
+        const expiresAt = new Date(Date.now() + RESET_TOKEN_EXPIRY_MS);
+
+        await this.userRepository.setResetPasswordToken(
+          user._id.toString(),
+          hashedToken,
+          expiresAt
+        );
+
+        const resetUrl = `${this.appUrl}/reset-password?token=${plainToken}`;
+
+        await this.mailService.sendResetPasswordEmail(
+          user.email,
+          plainToken,
+          user.firstName,
+          resetUrl
+        );
+
+        this.logger.log(
+          `Password reset requested for: ${user.email} from IP: ${metadata.ip}`
+        );
+      } else {
+        this.logger.debug(
+          `Password reset requested for non-existent/inactive email: ${dto.email}`
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error during forgot password for ${dto.email}:`,
+        error
+      );
+    }
+
+    await this.applyTimedResponse(startTime);
+
+    return {
+      message:
+        "If an account with this email exists, you will receive a password reset link shortly.",
+    };
+  }
+
+  async resetPassword(
+    dto: ResetPasswordDto,
+    metadata: SessionMetadata
+  ): Promise<{ message: string }> {
+    const hashedToken = this.hashResetToken(dto.token);
+
+    const user = await this.userRepository.findByResetToken(hashedToken);
+
+    if (!user) {
+      this.logger.warn(
+        `Invalid or expired reset token attempted from IP: ${metadata.ip}`
+      );
+      throw new BadRequestException(
+        "Invalid or expired password reset link. Please request a new one."
+      );
+    }
+
+    const hashedPassword = await this.hashPassword(dto.newPassword);
+
+    await this.userRepository.updatePassword(
+      user._id.toString(),
+      hashedPassword
+    );
+
+    const invalidatedCount =
+      await this.sessionService.invalidateAllUserSessions(user._id.toString());
+
+    this.logger.log(
+      `Password reset completed for: ${user.email}. Invalidated ${invalidatedCount} session(s).`
+    );
+
+    return {
+      message:
+        "Your password has been successfully reset. Please log in with your new password.",
+    };
+  }
+
+  async changePassword(
+    userId: string,
+    dto: ChangePasswordDto,
+    metadata: SessionMetadata
+  ): Promise<{ message: string }> {
+    const user = await this.userRepository.findById(userId);
+
+    if (!user) {
+      throw new BadRequestException("User not found");
+    }
+
+    const userWithPassword = await this.userRepository.findByEmail(
+      user.email,
+      true
+    );
+
+    if (!userWithPassword) {
+      throw new BadRequestException("User not found");
+    }
+
+    const isCurrentPasswordValid = await this.verifyPassword(
+      userWithPassword.password,
+      dto.currentPassword
+    );
+
+    if (!isCurrentPasswordValid) {
+      this.logger.warn(
+        `Invalid current password attempt for user: ${user.email} from IP: ${metadata.ip}`
+      );
+      throw new UnauthorizedException("Current password is incorrect");
+    }
+
+    const isSamePassword = await this.verifyPassword(
+      userWithPassword.password,
+      dto.newPassword
+    );
+
+    if (isSamePassword) {
+      throw new BadRequestException(
+        "New password must be different from current password"
+      );
+    }
+
+    const hashedPassword = await this.hashPassword(dto.newPassword);
+    await this.userRepository.updatePassword(userId, hashedPassword);
+
+    const invalidatedCount =
+      await this.sessionService.invalidateAllUserSessions(userId);
+
+    this.logger.log(
+      `Password changed for: ${user.email}. Invalidated ${invalidatedCount} session(s).`
+    );
+
+    return {
+      message:
+        "Your password has been successfully changed. Please log in again.",
+    };
+  }
+
+  private generateResetToken(): string {
+    return randomBytes(32).toString("base64url");
+  }
+
+  private hashResetToken(token: string): string {
+    return createHash("sha256").update(token).digest("hex");
+  }
+
+  private async applyTimedResponse(startTime: number): Promise<void> {
+    const elapsed = Date.now() - startTime;
+    const targetDelay =
+      TIMED_RESPONSE_MIN_MS +
+      Math.random() * (TIMED_RESPONSE_MAX_MS - TIMED_RESPONSE_MIN_MS);
+
+    const remainingDelay = Math.max(0, targetDelay - elapsed);
+
+    if (remainingDelay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, remainingDelay));
+    }
   }
 }

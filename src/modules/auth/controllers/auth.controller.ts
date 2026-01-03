@@ -15,6 +15,11 @@ import {
 import { FastifyRequest, FastifyReply } from "fastify";
 import { AuthService } from "../services/auth.service";
 import { RegisterDto, LoginDto, VerifyEmailDto } from "../dto/auth.dto";
+import {
+  ForgotPasswordDto,
+  ResetPasswordDto,
+  ChangePasswordDto,
+} from "../dto/recovery.dto";
 import { Public } from "../../../core/decorators";
 import {
   CurrentUser,
@@ -286,6 +291,67 @@ export class AuthController {
     await this.authService.logout(sessionId);
 
     return { message: "Session revoked successfully" };
+  }
+
+  @Public()
+  @Post("forgot-password")
+  @HttpCode(HttpStatus.OK)
+  async forgotPassword(
+    @Body() dto: ForgotPasswordDto,
+    @Req() request: FastifyRequest
+  ) {
+    const metadata = this.extractSessionMetadata(request);
+    const deviceId = this.extractDeviceId(request);
+
+    this.logger.log(
+      `[FORGOT_PASSWORD] Request from IP: ${
+        metadata.ip
+      }, Device: ${deviceId.substring(0, 8)}...`
+    );
+
+    return this.authService.forgotPassword(dto, metadata);
+  }
+
+  @Public()
+  @Post("reset-password")
+  @HttpCode(HttpStatus.OK)
+  async resetPassword(
+    @Body() dto: ResetPasswordDto,
+    @Req() request: FastifyRequest
+  ) {
+    const metadata = this.extractSessionMetadata(request);
+    const deviceId = this.extractDeviceId(request);
+
+    this.logger.log(
+      `[RESET_PASSWORD] Request from IP: ${
+        metadata.ip
+      }, Device: ${deviceId.substring(0, 8)}...`
+    );
+
+    return this.authService.resetPassword(dto, metadata);
+  }
+
+  @Post("change-password")
+  @HttpCode(HttpStatus.OK)
+  async changePassword(
+    @Body() dto: ChangePasswordDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() request: FastifyRequest
+  ) {
+    if (!user) {
+      throw new UnauthorizedException("Authentication required");
+    }
+
+    const metadata = this.extractSessionMetadata(request);
+    const deviceId = this.extractDeviceId(request);
+
+    this.logger.log(
+      `[CHANGE_PASSWORD] User: ${user.email}, IP: ${
+        metadata.ip
+      }, Device: ${deviceId.substring(0, 8)}...`
+    );
+
+    return this.authService.changePassword(user.id, dto, metadata);
   }
 
   private extractDeviceId(request: FastifyRequest): string {

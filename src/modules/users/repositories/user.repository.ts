@@ -111,4 +111,73 @@ export class UserRepository extends BaseRepository<UserDocument> {
       nearWalletAddress: walletAddress,
     } as Partial<UserDocument>);
   }
+
+  async setResetPasswordToken(
+    userId: string,
+    hashedToken: string,
+    expiresAt: Date
+  ): Promise<UserDocument | null> {
+    return this.userModel
+      .findByIdAndUpdate(
+        userId,
+        {
+          resetPasswordToken: hashedToken,
+          resetPasswordExpiresAt: expiresAt,
+        },
+        { new: true }
+      )
+      .lean()
+      .exec() as Promise<UserDocument | null>;
+  }
+
+  /**
+   * Find user by reset token - includes password and token fields for verification
+   */
+  async findByResetToken(hashedToken: string): Promise<UserDocument | null> {
+    return this.userModel
+      .findOne({
+        resetPasswordToken: hashedToken,
+        resetPasswordExpiresAt: { $gt: new Date() },
+        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+      })
+      .select("+password +resetPasswordToken")
+      .lean()
+      .exec() as Promise<UserDocument | null>;
+  }
+
+  async clearResetPasswordToken(userId: string): Promise<UserDocument | null> {
+    return this.userModel
+      .findByIdAndUpdate(
+        userId,
+        {
+          $unset: {
+            resetPasswordToken: 1,
+            resetPasswordExpiresAt: 1,
+          },
+        },
+        { new: true }
+      )
+      .lean()
+      .exec() as Promise<UserDocument | null>;
+  }
+
+  async updatePassword(
+    userId: string,
+    hashedPassword: string
+  ): Promise<UserDocument | null> {
+    return this.userModel
+      .findByIdAndUpdate(
+        userId,
+        {
+          password: hashedPassword,
+          $unset: {
+            resetPasswordToken: 1,
+            resetPasswordExpiresAt: 1,
+          },
+        },
+        { new: true }
+      )
+      .lean()
+      .exec() as Promise<UserDocument | null>;
+  }
 }

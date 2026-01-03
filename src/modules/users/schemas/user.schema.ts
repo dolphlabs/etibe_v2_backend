@@ -58,6 +58,9 @@ export interface UserDocument extends Document {
   isDeleted: boolean;
   createdAt: Date;
   updatedAt: Date;
+  // Password Reset Fields
+  resetPasswordToken?: string;
+  resetPasswordExpiresAt?: Date;
 }
 
 @Schema({
@@ -192,6 +195,17 @@ export class User {
     default: false,
   })
   isDeleted!: boolean;
+
+  // Password Reset Fields
+  @Prop({
+    select: false,
+  })
+  resetPasswordToken?: string;
+
+  @Prop({
+    index: true,
+  })
+  resetPasswordExpiresAt?: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
