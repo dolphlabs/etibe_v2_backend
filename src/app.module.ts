@@ -33,6 +33,7 @@ import { UsersModule } from "./modules/users";
 import { AuthModule } from "./modules/auth";
 import { CirclesModule } from "./modules/circles";
 import { BlockchainModule } from "./modules/blockchain";
+import { WalletModule } from "./modules/wallet";
 
 @Module({
   imports: [
@@ -148,6 +149,7 @@ import { BlockchainModule } from "./modules/blockchain";
     AuthModule,
     CirclesModule,
     BlockchainModule,
+    WalletModule,
   ],
   providers: [
     {

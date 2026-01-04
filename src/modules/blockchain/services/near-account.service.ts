@@ -722,17 +722,18 @@ export class NearAccountService implements OnModuleInit {
     }
   }
 
-  /**
-   * Get the token contract ID for a given currency
-   */
   private getTokenContractId(currency: string): string {
-    // Token contract addresses on NEAR
     const tokenContracts: Record<string, string> = {
       USDT:
         this.networkId === "mainnet"
           ? "usdt.tether-token.near"
           : "usdt.fakes.testnet",
       USDC:
+        this.networkId === "mainnet"
+          ? "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"
+          : "usdc.fakes.testnet",
+      // Bridged USDC from Rainbow Bridge (legacy)
+      USDC_BRIDGED:
         this.networkId === "mainnet"
           ? "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near"
           : "usdc.fakes.testnet",
@@ -759,34 +760,56 @@ export class NearAccountService implements OnModuleInit {
     try {
       const nearBalance = await this.getAccountBalance(accountId);
       balances.NEAR = nearBalance.available || "0";
-    } catch (error) {
-      this.logger.warn(`Failed to get NEAR balance for ${accountId}`);
+    } catch (error: any) {
+      this.logger.warn(
+        `Failed to get NEAR balance for ${accountId}: ${error.message}`
+      );
     }
 
     // Get USDT balance
     try {
       const usdtBalance = await this.getTokenBalance(accountId, "USDT");
       balances.USDT = usdtBalance;
-    } catch (error) {
-      this.logger.warn(`Failed to get USDT balance for ${accountId}`);
+    } catch (error: any) {
+      this.logger.warn(
+        `Failed to get USDT balance for ${accountId}: ${error.message}`
+      );
     }
 
-    // Get USDC balance
+    // Get USDC balance (try native USDC first)
     try {
       const usdcBalance = await this.getTokenBalance(accountId, "USDC");
       balances.USDC = usdcBalance;
-    } catch (error) {
-      this.logger.warn(`Failed to get USDC balance for ${accountId}`);
+
+      // If native USDC is 0, also check bridged USDC
+      if (parseFloat(usdcBalance) === 0) {
+        const bridgedUsdcBalance = await this.getTokenBalance(
+          accountId,
+          "USDC_BRIDGED"
+        );
+        if (parseFloat(bridgedUsdcBalance) > 0) {
+          balances.USDC = bridgedUsdcBalance;
+        }
+      }
+    } catch (error: any) {
+      this.logger.warn(
+        `Failed to get USDC balance for ${accountId}: ${error.message}`
+      );
     }
+
+    this.logger.debug(
+      `Wallet balances for ${accountId}: NEAR=${balances.NEAR}, USDT=${balances.USDT}, USDC=${balances.USDC}`
+    );
 
     return balances;
   }
 
-  /**
-   * Get fungible token balance for an account
-   */
   async getTokenBalance(accountId: string, currency: string): Promise<string> {
     const tokenContractId = this.getTokenContractId(currency);
+
+    this.logger.debug(
+      `Fetching ${currency} balance for ${accountId} from contract ${tokenContractId}`
+    );
 
     try {
       const result = await this.provider.query({
@@ -803,16 +826,75 @@ export class NearAccountService implements OnModuleInit {
       const resultData = result as any;
 
       if (resultData.result) {
-        const balance = JSON.parse(Buffer.from(resultData.result).toString());
+        const balanceRaw = Buffer.from(resultData.result).toString();
+
+        this.logger.debug(
+          `Raw balance response for ${currency}: ${balanceRaw}`
+        );
+
+        const balance = JSON.parse(balanceRaw);
+
+        const balanceStr =
+          typeof balance === "string" ? balance : String(balance);
+        const balanceBigInt = BigInt(balanceStr);
+
+        this.logger.debug(
+          `Parsed balance string for ${currency}: ${balanceStr}`
+        );
+
         // Convert from base units (6 decimals for USDT/USDC) to human readable
         const decimals = currency === "NEAR" ? 24 : 6;
-        const divisor = Math.pow(10, decimals);
-        return (parseFloat(balance) / divisor).toFixed(decimals === 6 ? 2 : 4);
+        const divisor = BigInt(10 ** decimals);
+        const wholePart = balanceBigInt / divisor;
+        const fractionalPart = balanceBigInt % divisor;
+
+        this.logger.debug(
+          `${currency} balance calculation: wholePart=${wholePart}, fractionalPart=${fractionalPart}`
+        );
+
+        if (decimals === 6) {
+          const fractionalStr = fractionalPart
+            .toString()
+            .padStart(decimals, "0");
+          const trimmedFractional = fractionalStr.replace(/0+$/, "") || "0";
+          const finalBalance =
+            trimmedFractional === "0"
+              ? wholePart.toString()
+              : `${wholePart}.${trimmedFractional.slice(0, 2)}`;
+
+          this.logger.debug(`Final ${currency} balance: ${finalBalance}`);
+          return finalBalance;
+        } else {
+          const fractionalStr = fractionalPart
+            .toString()
+            .padStart(decimals, "0");
+          const trimmedFractional = fractionalStr.replace(/0+$/, "") || "0";
+          const finalBalance =
+            trimmedFractional === "0"
+              ? wholePart.toString()
+              : `${wholePart}.${trimmedFractional.slice(0, 4)}`;
+
+          this.logger.debug(`Final ${currency} balance: ${finalBalance}`);
+
+          return finalBalance;
+        }
       }
 
+      this.logger.debug(`No balance result for ${currency} at ${accountId}`);
       return "0";
-    } catch (error) {
-      this.logger.debug(`Token balance query failed for ${currency}:`, error);
+    } catch (error: any) {
+      if (
+        error.message?.includes("account") ||
+        error.type === "AccountDoesNotExist"
+      ) {
+        this.logger.debug(
+          `Account ${accountId} not registered for ${currency} token`
+        );
+      } else {
+        this.logger.warn(
+          `Token balance query failed for ${currency} (${tokenContractId}): ${error.message}`
+        );
+      }
       return "0";
     }
   }
