@@ -523,11 +523,31 @@ export class CircleService {
       );
     }
 
+    if (currency === "USDT" || currency === "USDC") {
+      try {
+        const isRegistered =
+          await this.nearAccountService.ensureTokenRegistration(
+            user.nearAccountId,
+            currency as "USDT" | "USDC"
+          );
+
+        if (!isRegistered) {
+          this.logger.warn(
+            `Failed to register ${user.nearAccountId} with ${currency} contract, proceeding anyway...`
+          );
+        }
+      } catch (error: any) {
+        this.logger.warn(
+          `Token registration check failed for ${user.nearAccountId}: ${error.message}`
+        );
+        // Don't throw - the contribution might still work if already registered
+      }
+    }
+
     this.logger.log(
       `Executing contribution: ${amount} ${currency} from ${user.nearAccountId} for circle ${circle.name}`
     );
 
-    // Execute the actual blockchain transfer
     const { txHash } = await this.nearAccountService.executeContribution(
       user.nearAccountId,
       user.nearEncryptedPrivateKey,
@@ -536,7 +556,6 @@ export class CircleService {
       currency
     );
 
-    // Create transaction record
     const transaction = await this.transactionRepository.create({
       type: TransactionType.CONTRIBUTION,
       status: TransactionStatus.CONFIRMED,
@@ -550,10 +569,8 @@ export class CircleService {
       confirmedAt: new Date(),
     } as Partial<TransactionDocument>);
 
-    // Update circle total contributed
     await this.circleRepository.incrementTotalContributed(circleId, amount);
 
-    // Send contribution email
     await this.circleMailService.sendContributionReceivedEmail(
       user.email,
       user.firstName,

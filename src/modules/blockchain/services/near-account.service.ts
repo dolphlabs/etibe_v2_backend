@@ -168,7 +168,7 @@ export class NearAccountService implements OnModuleInit {
 
   async createSubAccount(
     username: string,
-    initialBalanceNear: string = "0.1"
+    initialBalanceNear: string = "0.5"
   ): Promise<NearAccountCredentials> {
     if (!this.initialized) {
       throw new BadRequestException(
@@ -231,6 +231,23 @@ export class NearAccountService implements OnModuleInit {
       }
 
       this.logger.log(`Created NEAR sub-account: ${newAccountId}`);
+
+      this.registerWithTokenContracts(newAccountId)
+        .then((results) => {
+          const failed = results.filter((r) => !r.success);
+          if (failed.length > 0) {
+            this.logger.warn(
+              `Some token registrations failed for ${newAccountId}: ${failed
+                .map((f) => `${f.token}: ${f.error}`)
+                .join(", ")}`
+            );
+          }
+        })
+        .catch((error) => {
+          this.logger.warn(
+            `Token registration failed for ${newAccountId}: ${error.message}`
+          );
+        });
 
       const encryptedPrivateKey =
         this.vaultService.encryptPrivateKey(privateKey);
@@ -379,10 +396,234 @@ export class NearAccountService implements OnModuleInit {
     return KeyPair.fromString(privateKeyString as any);
   }
 
-  /**
-   * Deploy a circle contract as a sub-account of the master account.
-   * This abstracts blockchain complexity from users.
-   */
+  async registerAccountWithToken(
+    accountId: string,
+    tokenContractId: string
+  ): Promise<{ success: boolean; txHash?: string; error?: string }> {
+    if (!this.initialized) {
+      return { success: false, error: "NEAR account service not initialized" };
+    }
+
+    try {
+      // Storage deposit amount: 0.00125 NEAR (minimum for most NEP-141 tokens)
+      const storageDepositAmount = utils.format.parseNearAmount("0.00125");
+      if (!storageDepositAmount) {
+        return {
+          success: false,
+          error: "Failed to parse storage deposit amount",
+        };
+      }
+
+      const accessKeyResponse = await this.provider.query({
+        request_type: "view_access_key",
+        finality: "final",
+        account_id: this.masterAccountId,
+        public_key: this.masterKeyPair.getPublicKey().toString(),
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nonce = (accessKeyResponse as any).nonce + 1;
+      const status = await this.provider.status();
+      const blockHash = utils.serialize.base_decode(
+        status.sync_info.latest_block_hash
+      );
+
+      const storageDepositArgs = {
+        account_id: accountId,
+        registration_only: true,
+      };
+
+      const action = transactions.functionCall(
+        "storage_deposit",
+        Buffer.from(JSON.stringify(storageDepositArgs)),
+        BigInt("30000000000000"), // 30 TGas
+        BigInt(storageDepositAmount)
+      );
+
+      const transaction = transactions.createTransaction(
+        this.masterAccountId,
+        this.masterKeyPair.getPublicKey(),
+        tokenContractId,
+        nonce,
+        [action],
+        blockHash
+      );
+
+      const serializedTx = utils.serialize.serialize(
+        transactions.SCHEMA.Transaction,
+        transaction
+      );
+
+      const hash = new Uint8Array(
+        require("js-sha256").sha256.array(serializedTx)
+      );
+      const signature = this.masterKeyPair.sign(hash);
+
+      const signedTransaction = new transactions.SignedTransaction({
+        transaction,
+        signature: new transactions.Signature({
+          keyType: this.masterKeyPair.getPublicKey().keyType,
+          data: signature.signature,
+        }),
+      });
+
+      const result = await this.provider.sendTransaction(signedTransaction);
+
+      if (
+        result.status &&
+        typeof result.status === "object" &&
+        "SuccessValue" in result.status
+      ) {
+        this.logger.log(
+          `✓ Registered ${accountId} with token ${tokenContractId}, txHash: ${result.transaction_outcome.id}`
+        );
+        return {
+          success: true,
+          txHash: result.transaction_outcome.id,
+        };
+      }
+
+      if (
+        result.status &&
+        typeof result.status === "object" &&
+        "Failure" in result.status
+      ) {
+        const errorMsg = JSON.stringify(result.status);
+        this.logger.warn(
+          `Token registration failed for ${accountId} on ${tokenContractId}: ${errorMsg}`
+        );
+        return { success: false, error: errorMsg };
+      }
+
+      return {
+        success: true,
+        txHash: result.transaction_outcome.id,
+      };
+    } catch (error: any) {
+      this.logger.warn(
+        `Failed to register ${accountId} with token ${tokenContractId}: ${error.message}`
+      );
+      return { success: false, error: error.message };
+    }
+  }
+
+  async isAccountRegisteredWithToken(
+    accountId: string,
+    tokenContractId: string
+  ): Promise<boolean> {
+    try {
+      const result = await this.provider.query({
+        request_type: "call_function",
+        finality: "final",
+        account_id: tokenContractId,
+        method_name: "storage_balance_of",
+        args_base64: Buffer.from(
+          JSON.stringify({ account_id: accountId })
+        ).toString("base64"),
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const resultData = result as any;
+      const balance = JSON.parse(Buffer.from(resultData.result).toString());
+
+      return balance && balance.total && BigInt(balance.total) > 0n;
+    } catch (error: any) {
+      this.logger.debug(
+        `Storage balance check failed for ${accountId} on ${tokenContractId}: ${error.message}`
+      );
+      return false;
+    }
+  }
+
+  async registerWithTokenContracts(accountId: string): Promise<
+    Array<{
+      token: string;
+      success: boolean;
+      txHash?: string;
+      error?: string;
+    }>
+  > {
+    const tokens = ["USDT", "USDC"] as const;
+    const results: Array<{
+      token: string;
+      success: boolean;
+      txHash?: string;
+      error?: string;
+    }> = [];
+
+    this.logger.log(
+      `Registering account ${accountId} with token contracts: ${tokens.join(
+        ", "
+      )}`
+    );
+
+    for (const token of tokens) {
+      const tokenContractId = this.getTokenContractId(token);
+
+      const isRegistered = await this.isAccountRegisteredWithToken(
+        accountId,
+        tokenContractId
+      );
+
+      if (isRegistered) {
+        this.logger.debug(
+          `Account ${accountId} already registered with ${token} (${tokenContractId})`
+        );
+        results.push({ token, success: true });
+        continue;
+      }
+
+      const registrationResult = await this.registerAccountWithToken(
+        accountId,
+        tokenContractId
+      );
+
+      results.push({
+        token,
+        ...registrationResult,
+      });
+
+      // Small delay between registrations to avoid nonce collisions
+      if (tokens.indexOf(token) < tokens.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+    }
+
+    const successful = results.filter((r) => r.success).length;
+    this.logger.log(
+      `Token registration complete for ${accountId}: ${successful}/${tokens.length} successful`
+    );
+
+    return results;
+  }
+
+  async ensureTokenRegistration(
+    accountId: string,
+    tokenSymbol: "USDT" | "USDC"
+  ): Promise<boolean> {
+    const tokenContractId = this.getTokenContractId(tokenSymbol);
+
+    const isRegistered = await this.isAccountRegisteredWithToken(
+      accountId,
+      tokenContractId
+    );
+
+    if (isRegistered) {
+      return true;
+    }
+
+    this.logger.log(
+      `Lazy registration: ${accountId} not registered with ${tokenSymbol}, registering now...`
+    );
+
+    const result = await this.registerAccountWithToken(
+      accountId,
+      tokenContractId
+    );
+
+    return result.success;
+  }
+
   async deployCircleContract(
     circleId: string,
     circleName: string,
@@ -399,14 +640,12 @@ export class NearAccountService implements OnModuleInit {
       );
     }
 
-    // Generate a unique sub-account for this circle
     const sanitizedId = circleId
       .substring(0, 20)
       .toLowerCase()
       .replace(/[^a-z0-9]/g, "");
     const circleAccountId = `circle-${sanitizedId}.${this.masterAccountId}`;
 
-    // Check if already exists
     const exists = await this.checkAccountExists(circleAccountId);
     if (exists) {
       this.logger.warn(`Circle contract ${circleAccountId} already exists`);
@@ -417,8 +656,6 @@ export class NearAccountService implements OnModuleInit {
     }
 
     try {
-      // Step 1: Create the sub-account for the circle
-      // We'll fund it with enough NEAR for storage and operations
       const initialBalance = "2"; // 2 NEAR for contract storage
       const amount = utils.format.parseNearAmount(initialBalance);
 
@@ -426,7 +663,6 @@ export class NearAccountService implements OnModuleInit {
         throw new BadRequestException("Invalid initial balance amount");
       }
 
-      // Get access key for nonce
       const accessKeyResponse = await this.provider.query({
         request_type: "view_access_key",
         finality: "final",
@@ -443,7 +679,6 @@ export class NearAccountService implements OnModuleInit {
 
       const masterPublicKey = this.masterKeyPair.getPublicKey();
 
-      // Create account actions
       const createActions = [
         transactions.createAccount(),
         transactions.transfer(BigInt(amount)),
@@ -480,8 +715,8 @@ export class NearAccountService implements OnModuleInit {
       const createResult = await this.provider.sendTransaction(signedCreateTx);
       this.logger.log(`Circle account created: ${circleAccountId}`);
 
-      // Step 2: For now, we'll simulate contract deployment by storing init args
-      // In production, you'd deploy actual WASM bytecode here
+      // For now, we simulate contract deployment by storing init args
+      // In production, we'd deploy actual WASM bytecode here
       // The init args represent the circle configuration
       const initArgs = {
         name: circleName,
@@ -497,10 +732,10 @@ export class NearAccountService implements OnModuleInit {
 
       this.logger.log(`Circle contract initialized with args:`, initArgs);
 
-      // In a real implementation, you would:
+      // In a real implementation, we would:
       // 1. Load the circle contract WASM bytecode
       // 2. Deploy it to the circle account
-      // 3. Call the initialize function
+      // 3. Call the initialise function
 
       // For now, we return the account as the contract address
       const txHash = createResult.transaction_outcome?.id || "deployed";
@@ -530,9 +765,6 @@ export class NearAccountService implements OnModuleInit {
     return this.initialized;
   }
 
-  /**
-   * Get the balance of a NEAR account
-   */
   async getAccountBalance(accountId: string): Promise<{
     total: string;
     available: string;
@@ -557,7 +789,6 @@ export class NearAccountService implements OnModuleInit {
         : "0";
       const staked = accountData.locked || "0";
 
-      // Available = total - stateStaked - staked
       const totalBig = BigInt(total);
       const stateStakedBig = BigInt(stateStaked);
       const stakedBig = BigInt(staked);
@@ -576,10 +807,6 @@ export class NearAccountService implements OnModuleInit {
     }
   }
 
-  /**
-   * Execute a contribution transfer from user's wallet to the circle contract.
-   * This is the key abstraction - users don't need to understand blockchain transactions.
-   */
   async executeContribution(
     userNearAccountId: string,
     userEncryptedPrivateKey: EncryptedData,
@@ -593,15 +820,11 @@ export class NearAccountService implements OnModuleInit {
       );
     }
 
-    // Ensure amount is a string
     const amountStr = String(amount);
 
-    // Decrypt user's private key
     const userKeyPair = this.decryptAndGetKeyPair(userEncryptedPrivateKey);
     const userPublicKey = userKeyPair.getPublicKey();
 
-    // For NEAR native transfers, convert amount to yoctoNEAR
-    // For other tokens (USDT, USDC), we'd call the token contract
     let yoctoAmount: string;
 
     if (currency === "NEAR") {
@@ -611,7 +834,6 @@ export class NearAccountService implements OnModuleInit {
       }
       yoctoAmount = parsed;
     } else {
-      // For stablecoins, amount is already in base units (assuming 6 decimals like USDT)
       yoctoAmount = (parseFloat(amountStr) * 1_000_000).toString();
     }
 
@@ -629,7 +851,6 @@ export class NearAccountService implements OnModuleInit {
     }
 
     try {
-      // Get nonce and block hash
       const accessKeyResponse = await this.provider.query({
         request_type: "view_access_key",
         finality: "final",
@@ -650,11 +871,8 @@ export class NearAccountService implements OnModuleInit {
         // Simple NEAR transfer
         actions = [transactions.transfer(BigInt(yoctoAmount))];
       } else {
-        // For fungible tokens (USDT, USDC), call ft_transfer on the token contract
-        // This is a placeholder - in production, you'd need the actual token contract addresses
         const tokenContractId = this.getTokenContractId(currency);
 
-        // Call ft_transfer on the token contract
         const args = {
           receiver_id: circleContractAddress,
           amount: yoctoAmount,
@@ -665,13 +883,12 @@ export class NearAccountService implements OnModuleInit {
           transactions.functionCall(
             "ft_transfer",
             Buffer.from(JSON.stringify(args)),
-            BigInt(1), // 1 yoctoNEAR for security deposit
+            BigInt(1),
             BigInt(30_000_000_000_000) // 30 TGas
           ),
         ];
       }
 
-      // Create and sign transaction
       const transaction = transactions.createTransaction(
         userNearAccountId,
         userPublicKey,
@@ -766,7 +983,6 @@ export class NearAccountService implements OnModuleInit {
       );
     }
 
-    // Get USDT balance
     try {
       const usdtBalance = await this.getTokenBalance(accountId, "USDT");
       balances.USDT = usdtBalance;
@@ -776,12 +992,10 @@ export class NearAccountService implements OnModuleInit {
       );
     }
 
-    // Get USDC balance (try native USDC first)
     try {
       const usdcBalance = await this.getTokenBalance(accountId, "USDC");
       balances.USDC = usdcBalance;
 
-      // If native USDC is 0, also check bridged USDC
       if (parseFloat(usdcBalance) === 0) {
         const bridgedUsdcBalance = await this.getTokenBalance(
           accountId,
@@ -842,7 +1056,6 @@ export class NearAccountService implements OnModuleInit {
           `Parsed balance string for ${currency}: ${balanceStr}`
         );
 
-        // Convert from base units (6 decimals for USDT/USDC) to human readable
         const decimals = currency === "NEAR" ? 24 : 6;
         const divisor = BigInt(10 ** decimals);
         const wholePart = balanceBigInt / divisor;
