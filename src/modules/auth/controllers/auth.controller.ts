@@ -14,7 +14,12 @@ import {
 } from "@nestjs/common";
 import { FastifyRequest, FastifyReply } from "fastify";
 import { AuthService } from "../services/auth.service";
-import { RegisterDto, LoginDto, VerifyEmailDto } from "../dto/auth.dto";
+import {
+  RegisterDto,
+  LoginDto,
+  VerifyEmailDto,
+  RefreshTokenDto,
+} from "../dto/auth.dto";
 import {
   ForgotPasswordDto,
   ResetPasswordDto,
@@ -32,9 +37,6 @@ import {
 import { UserService } from "@modules/users";
 import { NearAccountService } from "../../blockchain/services/near-account.service";
 
-const AUTH_COOKIE_NAME = "etibe_auth";
-const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
-
 @Controller("auth")
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
@@ -42,7 +44,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly userService: UserService,
-    private readonly nearAccountService: NearAccountService
+    private readonly nearAccountService: NearAccountService,
   ) {}
 
   @Public()
@@ -50,22 +52,21 @@ export class AuthController {
   async register(
     @Body() registerDto: RegisterDto,
     @Req() request: FastifyRequest,
-    @Res({ passthrough: true }) reply: FastifyReply
   ) {
     const deviceId = this.extractDeviceId(request);
     const metadata = this.extractSessionMetadata(request);
 
-    const { user, token } = await this.authService.register(
+    const { user, accessToken, refreshToken } = await this.authService.register(
       registerDto,
       deviceId,
-      metadata
+      metadata,
     );
-
-    this.setAuthCookie(reply, token);
 
     return {
       message: "Registration successful. Please verify your email.",
       user: this.sanitizeUser(user),
+      accessToken,
+      refreshToken,
       requiresVerification: true,
     };
   }
@@ -75,14 +76,14 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async verifyEmail(
     @Body() dto: VerifyEmailDto,
-    @Req() request: FastifyRequest
+    @Req() request: FastifyRequest,
   ) {
     const deviceId = this.extractDeviceId(request);
 
     const { user, nearAccountId } = await this.authService.verifyEmail(
       dto.email,
       dto,
-      deviceId
+      deviceId,
     );
 
     return {
@@ -97,7 +98,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async resendOtp(
     @CurrentUserId() userId: string,
-    @Req() request: FastifyRequest
+    @Req() request: FastifyRequest,
   ) {
     if (!userId) {
       throw new UnauthorizedException("Authentication required");
@@ -106,7 +107,7 @@ export class AuthController {
     const deviceId = this.extractDeviceId(request);
     const result = await this.authService.resendVerificationOtp(
       userId,
-      deviceId
+      deviceId,
     );
 
     return result;
@@ -123,25 +124,34 @@ export class AuthController {
   @Public()
   @Post("login")
   @HttpCode(HttpStatus.OK)
-  async login(
-    @Body() loginDto: LoginDto,
-    @Req() request: FastifyRequest,
-    @Res({ passthrough: true }) reply: FastifyReply
-  ) {
+  async login(@Body() loginDto: LoginDto, @Req() request: FastifyRequest) {
     const deviceId = loginDto.deviceId || this.extractDeviceId(request);
     const metadata = this.extractSessionMetadata(request);
 
-    const { user, token } = await this.authService.login(
+    const { user, accessToken, refreshToken } = await this.authService.login(
       loginDto,
       deviceId,
-      metadata
+      metadata,
     );
-
-    this.setAuthCookie(reply, token);
 
     return {
       message: "Login successful",
       user: this.sanitizeUser(user),
+      accessToken,
+      refreshToken,
+    };
+  }
+
+  @Public()
+  @Post("refresh")
+  @HttpCode(HttpStatus.OK)
+  async refresh(@Body() dto: RefreshTokenDto) {
+    const { accessToken } = await this.authService.refreshToken(
+      dto.refreshToken,
+    );
+
+    return {
+      accessToken,
     };
   }
 
@@ -149,14 +159,13 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async logout(
     @CurrentUser() user: AuthenticatedUser,
-    @Res({ passthrough: true }) reply: FastifyReply
+    @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     if (!user) {
       throw new UnauthorizedException("Not authenticated");
     }
 
     await this.authService.logout(user.sessionId);
-    this.clearAuthCookie(reply);
 
     return { message: "Logged out successfully" };
   }
@@ -165,14 +174,13 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async logoutAll(
     @CurrentUser() user: AuthenticatedUser,
-    @Res({ passthrough: true }) reply: FastifyReply
+    @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     if (!user) {
       throw new UnauthorizedException("Not authenticated");
     }
 
     const { invalidatedCount } = await this.authService.logoutAll(user.id);
-    this.clearAuthCookie(reply);
 
     return {
       message: `Logged out from ${invalidatedCount} session(s)`,
@@ -197,7 +205,7 @@ export class AuthController {
     if (result.nearAccountId) {
       try {
         const onChainBalances = await this.nearAccountService.getWalletBalances(
-          result.nearAccountId
+          result.nearAccountId,
         );
 
         walletBalance = {
@@ -214,11 +222,11 @@ export class AuthController {
             },
           } as any)
           .catch((err) =>
-            this.logger.warn("Failed to update wallet balance:", err)
+            this.logger.warn("Failed to update wallet balance:", err),
           );
       } catch (error) {
         this.logger.warn(
-          `Failed to fetch on-chain balances for ${result.nearAccountId}`
+          `Failed to fetch on-chain balances for ${result.nearAccountId}`,
         );
       }
     }
@@ -273,7 +281,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async revokeSession(
     @Param("sessionId") sessionId: string,
-    @CurrentUser() user: AuthenticatedUser
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     if (!user) {
       throw new UnauthorizedException("Not authenticated");
@@ -281,7 +289,7 @@ export class AuthController {
 
     const sessions = await this.authService.getActiveSessions(user.id);
     const sessionBelongsToUser = sessions.some((s) =>
-      s.sessionId.startsWith(sessionId.replace("...", ""))
+      s.sessionId.startsWith(sessionId.replace("...", "")),
     );
 
     if (!sessionBelongsToUser) {
@@ -298,7 +306,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async forgotPassword(
     @Body() dto: ForgotPasswordDto,
-    @Req() request: FastifyRequest
+    @Req() request: FastifyRequest,
   ) {
     const metadata = this.extractSessionMetadata(request);
     const deviceId = this.extractDeviceId(request);
@@ -306,7 +314,7 @@ export class AuthController {
     this.logger.log(
       `[FORGOT_PASSWORD] Request from IP: ${
         metadata.ip
-      }, Device: ${deviceId.substring(0, 8)}...`
+      }, Device: ${deviceId.substring(0, 8)}...`,
     );
 
     return this.authService.forgotPassword(dto, metadata);
@@ -317,7 +325,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async resetPassword(
     @Body() dto: ResetPasswordDto,
-    @Req() request: FastifyRequest
+    @Req() request: FastifyRequest,
   ) {
     const metadata = this.extractSessionMetadata(request);
     const deviceId = this.extractDeviceId(request);
@@ -325,7 +333,7 @@ export class AuthController {
     this.logger.log(
       `[RESET_PASSWORD] Request from IP: ${
         metadata.ip
-      }, Device: ${deviceId.substring(0, 8)}...`
+      }, Device: ${deviceId.substring(0, 8)}...`,
     );
 
     return this.authService.resetPassword(dto, metadata);
@@ -336,7 +344,7 @@ export class AuthController {
   async changePassword(
     @Body() dto: ChangePasswordDto,
     @CurrentUser() user: AuthenticatedUser,
-    @Req() request: FastifyRequest
+    @Req() request: FastifyRequest,
   ) {
     if (!user) {
       throw new UnauthorizedException("Authentication required");
@@ -348,7 +356,7 @@ export class AuthController {
     this.logger.log(
       `[CHANGE_PASSWORD] User: ${user.email}, IP: ${
         metadata.ip
-      }, Device: ${deviceId.substring(0, 8)}...`
+      }, Device: ${deviceId.substring(0, 8)}...`,
     );
 
     return this.authService.changePassword(user.id, dto, metadata);
@@ -383,26 +391,6 @@ export class AuthController {
         userAgent,
       },
     };
-  }
-
-  private setAuthCookie(reply: FastifyReply, token: string): void {
-    reply.setCookie(AUTH_COOKIE_NAME, token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: COOKIE_MAX_AGE,
-    });
-
-    this.logger.debug("Auth cookie set");
-  }
-
-  private clearAuthCookie(reply: FastifyReply): void {
-    reply.clearCookie(AUTH_COOKIE_NAME, {
-      path: "/",
-    });
-
-    this.logger.debug("Auth cookie cleared");
   }
 
   private sanitizeUser(user: AuthenticatedUser) {

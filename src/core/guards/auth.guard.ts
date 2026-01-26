@@ -15,7 +15,6 @@ import { IS_PUBLIC_KEY } from "../decorators";
 import { AuthenticatedUser } from "../../shared/types/session.types";
 import { RedisService } from "../services/redis.service";
 
-const AUTH_COOKIE_NAME = "etibe_auth";
 const SESSION_PREFIX = "session:";
 const USER_CACHE_PREFIX = "auth_user:";
 const USER_CACHE_TTL = 300000; // 5 minutes
@@ -48,7 +47,7 @@ export class AuthGuard implements CanActivate {
     protected readonly reflector: Reflector,
     @Optional() private readonly jwtService: JwtService,
     private readonly redisService: RedisService,
-    @InjectConnection() private readonly connection: Connection
+    @InjectConnection() private readonly connection: Connection,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -63,7 +62,7 @@ export class AuthGuard implements CanActivate {
 
     if (!this.jwtService) {
       this.logger.error(
-        "JwtService not available. Make sure AuthModule is imported."
+        "JwtService not available. Make sure AuthModule is imported.",
       );
       throw new UnauthorizedException("Authentication service unavailable");
     }
@@ -103,11 +102,6 @@ export class AuthGuard implements CanActivate {
   }
 
   private extractToken(request: FastifyRequest): string | null {
-    const cookies = request.cookies as Record<string, string> | undefined;
-    if (cookies && cookies[AUTH_COOKIE_NAME]) {
-      return cookies[AUTH_COOKIE_NAME];
-    }
-
     const authHeader = request.headers.authorization;
     if (authHeader && authHeader.startsWith("Bearer ")) {
       return authHeader.substring(7);
@@ -121,7 +115,7 @@ export class AuthGuard implements CanActivate {
       return this.jwtService.verify<JwtSessionPayload>(token);
     } catch (error) {
       this.logger.debug(
-        `Token verification failed: ${(error as Error).message}`
+        `Token verification failed: ${(error as Error).message}`,
       );
       return null;
     }
@@ -129,7 +123,7 @@ export class AuthGuard implements CanActivate {
 
   private async validateSession(
     sessionId: string,
-    deviceId: string
+    deviceId: string,
   ): Promise<EtibeSession | null> {
     const sessionKey = `${SESSION_PREFIX}${sessionId}`;
     const session = await this.redisService.get<EtibeSession>(sessionKey);
@@ -160,7 +154,7 @@ export class AuthGuard implements CanActivate {
   private async getUserData(
     userId: string,
     sessionId: string,
-    deviceId: string
+    deviceId: string,
   ): Promise<(AuthenticatedUser & { isActive: boolean }) | null> {
     const cacheKey = `${USER_CACHE_PREFIX}${userId}`;
     const cached = await this.redisService.get<any>(cacheKey);

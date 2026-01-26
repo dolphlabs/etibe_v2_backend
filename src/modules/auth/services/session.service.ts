@@ -27,7 +27,7 @@ export class SessionService {
 
   constructor(
     private readonly jwtService: JwtService,
-    private readonly redisService: RedisService
+    private readonly redisService: RedisService,
   ) {
     this.sessionTtlMs =
       (APP_CONSTANTS.SESSION_TTL_DAYS || 7) * 24 * 60 * 60 * 1000;
@@ -36,8 +36,12 @@ export class SessionService {
   async createSession(
     userId: string,
     deviceId: string,
-    metadata: SessionMetadata
-  ): Promise<{ session: EtibeSession; token: string }> {
+    metadata: SessionMetadata,
+  ): Promise<{
+    session: EtibeSession;
+    accessToken: string;
+    refreshToken: string;
+  }> {
     const sessionId = nanoid(32);
     const now = Date.now();
 
@@ -83,9 +87,39 @@ export class SessionService {
       did: deviceId,
     };
 
-    const token = this.jwtService.sign(payload);
+    const accessToken = this.jwtService.sign(payload, { expiresIn: "15m" });
+    const refreshToken = this.jwtService.sign(payload, { expiresIn: "7d" });
 
-    return { session, token };
+    return { session, accessToken, refreshToken };
+  }
+
+  async refreshAccessToken(
+    refreshToken: string,
+  ): Promise<{ accessToken: string; session: EtibeSession }> {
+    let payload: JwtSessionPayload;
+    try {
+      payload = this.jwtService.verify<JwtSessionPayload>(refreshToken);
+    } catch (error) {
+      throw new Error("Invalid refresh token");
+    }
+
+    const session = await this.validateSession(payload.sid, payload.did);
+
+    if (!session) {
+      throw new Error("Session expired or invalid");
+    }
+
+    await this.touchSession(session.sessionId);
+
+    const newPayload: JwtSessionPayload = {
+      sid: session.sessionId,
+      uid: session.userId,
+      did: session.deviceId,
+    };
+
+    const accessToken = this.jwtService.sign(newPayload, { expiresIn: "15m" });
+
+    return { accessToken, session };
   }
 
   async verifyToken(token: string): Promise<JwtSessionPayload | null> {
@@ -94,7 +128,7 @@ export class SessionService {
       return payload;
     } catch (error) {
       this.logger.debug(
-        `Token verification failed: ${(error as Error).message}`
+        `Token verification failed: ${(error as Error).message}`,
       );
       return null;
     }
@@ -108,7 +142,7 @@ export class SessionService {
 
   async validateSession(
     sessionId: string,
-    deviceId: string
+    deviceId: string,
   ): Promise<EtibeSession | null> {
     const session = await this.getSession(sessionId);
 
@@ -138,7 +172,7 @@ export class SessionService {
 
   async validateTokenAndSession(
     token: string,
-    deviceId?: string
+    deviceId?: string,
   ): Promise<EtibeSession | null> {
     const payload = await this.verifyToken(token);
 
@@ -148,7 +182,7 @@ export class SessionService {
 
     const session = await this.validateSession(
       payload.sid,
-      deviceId || payload.did
+      deviceId || payload.did,
     );
 
     return session;
@@ -164,7 +198,7 @@ export class SessionService {
       await this.redisService.set(
         sessionKey,
         session,
-        Math.max(ttlRemaining, 0)
+        Math.max(ttlRemaining, 0),
       );
     }
   }
@@ -227,7 +261,7 @@ export class SessionService {
 
   private async trackUserSession(
     userId: string,
-    sessionId: string
+    sessionId: string,
   ): Promise<void> {
     const userSessionsKey = `${USER_SESSIONS_PREFIX}${userId}`;
     const existingSessions =
@@ -238,14 +272,14 @@ export class SessionService {
       await this.redisService.set(
         userSessionsKey,
         existingSessions,
-        this.sessionTtlMs
+        this.sessionTtlMs,
       );
     }
   }
 
   private async removeUserSession(
     userId: string,
-    sessionId: string
+    sessionId: string,
   ): Promise<void> {
     const userSessionsKey = `${USER_SESSIONS_PREFIX}${userId}`;
     const existingSessions =
@@ -255,13 +289,13 @@ export class SessionService {
     await this.redisService.set(
       userSessionsKey,
       updatedSessions,
-      this.sessionTtlMs
+      this.sessionTtlMs,
     );
   }
 
   private async invalidateDeviceSession(
     userId: string,
-    deviceId: string
+    deviceId: string,
   ): Promise<void> {
     const deviceKey = `${DEVICE_SESSION_PREFIX}${userId}:${deviceId}`;
     const existingSessionId = await this.redisService.get<string>(deviceKey);

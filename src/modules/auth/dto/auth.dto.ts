@@ -39,7 +39,7 @@ export class RegisterDto {
     {
       message:
         "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
-    }
+    },
   )
   password!: string;
 
@@ -138,4 +138,10 @@ export class SessionResponseDto {
   createdAt!: Date;
   lastActive!: Date;
   isCurrent!: boolean;
+}
+
+export class RefreshTokenDto {
+  @IsString()
+  @MinLength(1, { message: "Refresh token is required" })
+  refreshToken!: string;
 }

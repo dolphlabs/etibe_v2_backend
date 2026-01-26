@@ -44,28 +44,32 @@ export class AuthService {
     private readonly mailService: MailService,
     private readonly nearAccountService: NearAccountService,
     private readonly vaultService: VaultService,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
   ) {
     this.appUrl = this.configService.get<string>(
       "app.appUrl",
-      "http://localhost:3000"
+      "http://localhost:3000",
     );
   }
 
   async register(
     registerDto: RegisterDto,
     deviceId: string,
-    metadata: SessionMetadata
-  ): Promise<{ user: AuthenticatedUser; token: string }> {
+    metadata: SessionMetadata,
+  ): Promise<{
+    user: AuthenticatedUser;
+    accessToken: string;
+    refreshToken: string;
+  }> {
     const emailExists = await this.userRepository.emailExists(
-      registerDto.email
+      registerDto.email,
     );
     if (emailExists) {
       throw new ConflictException("Email already exists");
     }
 
     const usernameExists = await this.userRepository.usernameExists(
-      registerDto.username
+      registerDto.username,
     );
     if (usernameExists) {
       throw new ConflictException("Username already taken");
@@ -90,39 +94,41 @@ export class AuthService {
       user.email,
       otp,
       deviceId,
-      user.firstName
+      user.firstName,
     );
 
-    const { session, token } = await this.sessionService.createSession(
-      user._id.toString(),
-      deviceId,
-      metadata
-    );
+    const { session, accessToken, refreshToken } =
+      await this.sessionService.createSession(
+        user._id.toString(),
+        deviceId,
+        metadata,
+      );
 
     this.logger.log(
-      `New user registered: ${user.email} (pending verification)`
+      `New user registered: ${user.email} (pending verification)`,
     );
 
     return {
       user: this.mapUserToAuthenticatedUser(user, session.sessionId, deviceId),
-      token,
+      accessToken,
+      refreshToken,
     };
   }
 
   async verifyEmail(
     email: string,
     dto: VerifyEmailDto,
-    deviceId: string
+    deviceId: string,
   ): Promise<{ user: AuthenticatedUser; nearAccountId: string }> {
     const result = await this.mailService.verifyOtp(
       dto.email,
       dto.otp,
-      deviceId
+      deviceId,
     );
 
     if (!result.valid) {
       throw new BadRequestException(
-        result.error || "Invalid verification code"
+        result.error || "Invalid verification code",
       );
     }
 
@@ -135,7 +141,7 @@ export class AuthService {
 
     const credentials = await this.nearAccountService.createSubAccount(
       user.username,
-      "0.1"
+      "0.1",
     );
 
     const updatedUser = await this.userRepository.update(user._id.toString(), {
@@ -152,7 +158,7 @@ export class AuthService {
     }
 
     this.logger.log(
-      `User ${user.email} verified. NEAR account: ${credentials.nearAccountId}`
+      `User ${user.email} verified. NEAR account: ${credentials.nearAccountId}`,
     );
 
     return {
@@ -163,7 +169,7 @@ export class AuthService {
 
   async resendVerificationOtp(
     userId: string,
-    deviceId: string
+    deviceId: string,
   ): Promise<{ success: boolean; message: string }> {
     const user = await this.userRepository.findById(userId);
 
@@ -181,7 +187,7 @@ export class AuthService {
       user.email,
       otp,
       deviceId,
-      user.firstName
+      user.firstName,
     );
 
     if (!result.success) {
@@ -197,8 +203,12 @@ export class AuthService {
   async login(
     loginDto: LoginDto,
     deviceId: string,
-    metadata: SessionMetadata
-  ): Promise<{ user: AuthenticatedUser; token: string }> {
+    metadata: SessionMetadata,
+  ): Promise<{
+    user: AuthenticatedUser;
+    accessToken: string;
+    refreshToken: string;
+  }> {
     const user = await this.findUserByEmailOrUsername(loginDto.identifier);
 
     if (!user) {
@@ -211,7 +221,7 @@ export class AuthService {
 
     const isPasswordValid = await this.verifyPassword(
       user.password,
-      loginDto.password
+      loginDto.password,
     );
 
     if (!isPasswordValid) {
@@ -220,18 +230,30 @@ export class AuthService {
 
     await this.userRepository.updateLastLogin(user._id.toString());
 
-    const { session, token } = await this.sessionService.createSession(
-      user._id.toString(),
-      deviceId,
-      metadata
-    );
+    const { session, accessToken, refreshToken } =
+      await this.sessionService.createSession(
+        user._id.toString(),
+        deviceId,
+        metadata,
+      );
 
     this.logger.log(`User logged in: ${user.email}`);
 
     return {
       user: this.mapUserToAuthenticatedUser(user, session.sessionId, deviceId),
-      token,
+      accessToken,
+      refreshToken,
     };
+  }
+
+  async refreshToken(refreshToken: string): Promise<{ accessToken: string }> {
+    try {
+      const { accessToken } =
+        await this.sessionService.refreshAccessToken(refreshToken);
+      return { accessToken };
+    } catch (error) {
+      throw new UnauthorizedException("Invalid or expired refresh token");
+    }
   }
 
   async logout(sessionId: string): Promise<void> {
@@ -247,11 +269,11 @@ export class AuthService {
 
   async validateSession(
     token: string,
-    deviceId?: string
+    deviceId?: string,
   ): Promise<AuthenticatedUser | null> {
     const session = await this.sessionService.validateTokenAndSession(
       token,
-      deviceId
+      deviceId,
     );
 
     if (!session) {
@@ -269,7 +291,7 @@ export class AuthService {
     return this.mapUserToAuthenticatedUser(
       user,
       session.sessionId,
-      session.deviceId
+      session.deviceId,
     );
   }
 
@@ -308,7 +330,7 @@ export class AuthService {
 
   private async verifyPassword(
     hash: string,
-    password: string
+    password: string,
   ): Promise<boolean> {
     try {
       return await argon2.verify(hash, password);
@@ -318,7 +340,7 @@ export class AuthService {
   }
 
   private async findUserByEmailOrUsername(
-    identifier: string
+    identifier: string,
   ): Promise<UserDocument | null> {
     let user = await this.userRepository.findByEmail(identifier, true);
 
@@ -332,7 +354,7 @@ export class AuthService {
   private mapUserToAuthenticatedUser(
     user: UserDocument,
     sessionId: string,
-    deviceId: string
+    deviceId: string,
   ): AuthenticatedUser {
     return {
       _id: user._id,
@@ -352,13 +374,13 @@ export class AuthService {
 
   async forgotPassword(
     dto: ForgotPasswordDto,
-    metadata: SessionMetadata
+    metadata: SessionMetadata,
   ): Promise<{ message: string }> {
     const startTime = Date.now();
 
     try {
       const user = await this.userRepository.findByEmail(
-        dto.email.toLowerCase()
+        dto.email.toLowerCase(),
       );
 
       if (user && user.isActive) {
@@ -369,7 +391,7 @@ export class AuthService {
         await this.userRepository.setResetPasswordToken(
           user._id.toString(),
           hashedToken,
-          expiresAt
+          expiresAt,
         );
 
         const resetUrl = `${this.appUrl}/reset-password?token=${plainToken}`;
@@ -378,21 +400,21 @@ export class AuthService {
           user.email,
           plainToken,
           user.firstName,
-          resetUrl
+          resetUrl,
         );
 
         this.logger.log(
-          `Password reset requested for: ${user.email} from IP: ${metadata.ip}`
+          `Password reset requested for: ${user.email} from IP: ${metadata.ip}`,
         );
       } else {
         this.logger.debug(
-          `Password reset requested for non-existent/inactive email: ${dto.email}`
+          `Password reset requested for non-existent/inactive email: ${dto.email}`,
         );
       }
     } catch (error) {
       this.logger.error(
         `Error during forgot password for ${dto.email}:`,
-        error
+        error,
       );
     }
 
@@ -406,7 +428,7 @@ export class AuthService {
 
   async resetPassword(
     dto: ResetPasswordDto,
-    metadata: SessionMetadata
+    metadata: SessionMetadata,
   ): Promise<{ message: string }> {
     const hashedToken = this.hashResetToken(dto.token);
 
@@ -414,10 +436,10 @@ export class AuthService {
 
     if (!user) {
       this.logger.warn(
-        `Invalid or expired reset token attempted from IP: ${metadata.ip}`
+        `Invalid or expired reset token attempted from IP: ${metadata.ip}`,
       );
       throw new BadRequestException(
-        "Invalid or expired password reset link. Please request a new one."
+        "Invalid or expired password reset link. Please request a new one.",
       );
     }
 
@@ -425,14 +447,14 @@ export class AuthService {
 
     await this.userRepository.updatePassword(
       user._id.toString(),
-      hashedPassword
+      hashedPassword,
     );
 
     const invalidatedCount =
       await this.sessionService.invalidateAllUserSessions(user._id.toString());
 
     this.logger.log(
-      `Password reset completed for: ${user.email}. Invalidated ${invalidatedCount} session(s).`
+      `Password reset completed for: ${user.email}. Invalidated ${invalidatedCount} session(s).`,
     );
 
     return {
@@ -444,7 +466,7 @@ export class AuthService {
   async changePassword(
     userId: string,
     dto: ChangePasswordDto,
-    metadata: SessionMetadata
+    metadata: SessionMetadata,
   ): Promise<{ message: string }> {
     const user = await this.userRepository.findById(userId);
 
@@ -454,7 +476,7 @@ export class AuthService {
 
     const userWithPassword = await this.userRepository.findByEmail(
       user.email,
-      true
+      true,
     );
 
     if (!userWithPassword) {
@@ -463,24 +485,24 @@ export class AuthService {
 
     const isCurrentPasswordValid = await this.verifyPassword(
       userWithPassword.password,
-      dto.currentPassword
+      dto.currentPassword,
     );
 
     if (!isCurrentPasswordValid) {
       this.logger.warn(
-        `Invalid current password attempt for user: ${user.email} from IP: ${metadata.ip}`
+        `Invalid current password attempt for user: ${user.email} from IP: ${metadata.ip}`,
       );
       throw new UnauthorizedException("Current password is incorrect");
     }
 
     const isSamePassword = await this.verifyPassword(
       userWithPassword.password,
-      dto.newPassword
+      dto.newPassword,
     );
 
     if (isSamePassword) {
       throw new BadRequestException(
-        "New password must be different from current password"
+        "New password must be different from current password",
       );
     }
 
@@ -491,7 +513,7 @@ export class AuthService {
       await this.sessionService.invalidateAllUserSessions(userId);
 
     this.logger.log(
-      `Password changed for: ${user.email}. Invalidated ${invalidatedCount} session(s).`
+      `Password changed for: ${user.email}. Invalidated ${invalidatedCount} session(s).`,
     );
 
     return {
