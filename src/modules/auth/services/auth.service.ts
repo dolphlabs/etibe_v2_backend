@@ -168,13 +168,22 @@ export class AuthService {
   }
 
   async resendVerificationOtp(
-    userId: string,
+    email: string,
     deviceId: string,
   ): Promise<{ success: boolean; message: string }> {
-    const user = await this.userRepository.findById(userId);
+    const user = await this.userRepository.findByEmail(email.toLowerCase());
 
     if (!user) {
-      throw new BadRequestException("User not found");
+      // Return success even if user not found to prevent email enumeration
+      // but log it for debugging
+      this.logger.debug(
+        `OTP resend attempted for non-existent email: ${email}`,
+      );
+      return {
+        success: true,
+        message:
+          "If an account with this email exists, a new verification code has been sent.",
+      };
     }
 
     if (user.isEmailVerified) {

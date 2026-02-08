@@ -8,7 +8,7 @@ import { Circle, CircleDocument } from "../schemas";
 export class CircleRepository extends BaseRepository<CircleDocument> {
   constructor(
     @InjectModel(Circle.name)
-    private readonly circleModel: Model<CircleDocument>
+    private readonly circleModel: Model<CircleDocument>,
   ) {
     super(circleModel);
   }
@@ -20,7 +20,7 @@ export class CircleRepository extends BaseRepository<CircleDocument> {
   }
 
   async findByContractAddress(
-    contractAddress: string
+    contractAddress: string,
   ): Promise<CircleDocument | null> {
     return this.findOne({
       contractAddress,
@@ -46,7 +46,7 @@ export class CircleRepository extends BaseRepository<CircleDocument> {
       userId: Types.ObjectId;
       position: number;
       status: string;
-    }
+    },
   ): Promise<CircleDocument | null> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return this.circleModel
@@ -61,7 +61,7 @@ export class CircleRepository extends BaseRepository<CircleDocument> {
             },
           },
         } as UpdateQuery<CircleDocument>,
-        { new: true }
+        { new: true },
       )
       .lean()
       .exec() as Promise<CircleDocument | null>;
@@ -69,7 +69,7 @@ export class CircleRepository extends BaseRepository<CircleDocument> {
 
   async removeMember(
     circleId: string,
-    userId: string
+    userId: string,
   ): Promise<CircleDocument | null> {
     return this.circleModel
       .findByIdAndUpdate(
@@ -82,7 +82,7 @@ export class CircleRepository extends BaseRepository<CircleDocument> {
         {
           arrayFilters: [{ "elem.userId": new Types.ObjectId(userId) }],
           new: true,
-        }
+        },
       )
       .lean()
       .exec() as Promise<CircleDocument | null>;
@@ -90,14 +90,14 @@ export class CircleRepository extends BaseRepository<CircleDocument> {
 
   async updateStatus(
     circleId: string,
-    status: string
+    status: string,
   ): Promise<CircleDocument | null> {
     return this.update(circleId, { status } as Partial<CircleDocument>);
   }
 
   async setContractAddress(
     circleId: string,
-    contractAddress: string
+    contractAddress: string,
   ): Promise<CircleDocument | null> {
     return this.update(circleId, {
       contractAddress,
@@ -107,7 +107,7 @@ export class CircleRepository extends BaseRepository<CircleDocument> {
 
   async incrementTotalContributed(
     circleId: string,
-    amount: string
+    amount: string,
   ): Promise<CircleDocument | null> {
     return this.circleModel
       .findByIdAndUpdate(
@@ -115,7 +115,7 @@ export class CircleRepository extends BaseRepository<CircleDocument> {
         {
           $inc: { totalContributed: parseFloat(amount) },
         },
-        { new: true }
+        { new: true },
       )
       .lean()
       .exec() as Promise<CircleDocument | null>;
@@ -129,7 +129,7 @@ export class CircleRepository extends BaseRepository<CircleDocument> {
           $inc: { currentRound: 1 },
           $set: { totalContributed: "0" },
         },
-        { new: true }
+        { new: true },
       )
       .lean()
       .exec() as Promise<CircleDocument | null>;
@@ -138,7 +138,7 @@ export class CircleRepository extends BaseRepository<CircleDocument> {
   async markPayoutReceived(
     circleId: string,
     userId: string,
-    transactionHash: string
+    transactionHash: string,
   ): Promise<CircleDocument | null> {
     return this.circleModel
       .findByIdAndUpdate(
@@ -153,7 +153,7 @@ export class CircleRepository extends BaseRepository<CircleDocument> {
         {
           arrayFilters: [{ "elem.userId": new Types.ObjectId(userId) }],
           new: true,
-        }
+        },
       )
       .lean()
       .exec() as Promise<CircleDocument | null>;
@@ -162,6 +162,13 @@ export class CircleRepository extends BaseRepository<CircleDocument> {
   async inviteCodeExists(inviteCode: string): Promise<boolean> {
     return this.exists({
       inviteCode: inviteCode.toUpperCase(),
+    } as FilterQuery<CircleDocument>);
+  }
+
+  async countUserCircles(userId: string): Promise<number> {
+    return this.count({
+      "members.userId": new Types.ObjectId(userId),
+      "members.status": "ACTIVE",
     } as FilterQuery<CircleDocument>);
   }
 }

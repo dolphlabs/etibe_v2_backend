@@ -62,6 +62,40 @@ export class UpdateUserDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\+?[1-9]\d{1,14}$/, {
+    message: "Please provide a valid phone number in E.164 format",
+  })
+  phone?: string;
+}
+
+export class UpdateProfileDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(2, { message: "First name must be at least 2 characters" })
+  @MaxLength(50, { message: "First name cannot exceed 50 characters" })
+  @Transform(({ value }) => value?.trim())
+  firstName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(2, { message: "Last name must be at least 2 characters" })
+  @MaxLength(50, { message: "Last name cannot exceed 50 characters" })
+  @Transform(({ value }) => value?.trim())
+  lastName?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\+?[1-9]\d{1,14}$/, {
+    message: "Please provide a valid phone number in E.164 format",
+  })
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  avatar?: string;
 }
 
 export class UserQueryDto {

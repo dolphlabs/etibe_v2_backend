@@ -19,6 +19,7 @@ import {
   LoginDto,
   VerifyEmailDto,
   RefreshTokenDto,
+  ResendOtpDto,
 } from "../dto/auth.dto";
 import {
   ForgotPasswordDto,
@@ -36,6 +37,8 @@ import {
 } from "../../../shared/types/session.types";
 import { UserService } from "@modules/users";
 import { NearAccountService } from "../../blockchain/services/near-account.service";
+import { CircleRepository } from "../../circles/repositories/circle.repository";
+import { TransactionRepository } from "../../transactions/repositories/transaction.repository";
 
 @Controller("auth")
 export class AuthController {
@@ -45,6 +48,8 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly userService: UserService,
     private readonly nearAccountService: NearAccountService,
+    private readonly circleRepository: CircleRepository,
+    private readonly transactionRepository: TransactionRepository,
   ) {}
 
   @Public()
@@ -94,19 +99,13 @@ export class AuthController {
     };
   }
 
+  @Public()
   @Post("resend-otp")
   @HttpCode(HttpStatus.OK)
-  async resendOtp(
-    @CurrentUserId() userId: string,
-    @Req() request: FastifyRequest,
-  ) {
-    if (!userId) {
-      throw new UnauthorizedException("Authentication required");
-    }
-
+  async resendOtp(@Body() dto: ResendOtpDto, @Req() request: FastifyRequest) {
     const deviceId = this.extractDeviceId(request);
     const result = await this.authService.resendVerificationOtp(
-      userId,
+      dto.email,
       deviceId,
     );
 
@@ -231,6 +230,11 @@ export class AuthController {
       }
     }
 
+    const [channelsJoined, completedContributions] = await Promise.all([
+      this.circleRepository.countUserCircles(user.id),
+      this.transactionRepository.countUserCompletedContributions(user.id),
+    ]);
+
     return {
       user: {
         id: result._id,
@@ -239,6 +243,7 @@ export class AuthController {
         firstName: result.firstName,
         lastName: result.lastName,
         avatar: result.avatar,
+        phone: result.phone,
         createdAt: result.createdAt,
         updatedAt: result.updatedAt,
         onboardingCompleted: result.onboardingCompleted,
@@ -247,6 +252,11 @@ export class AuthController {
         deletedAt: result.deletedAt,
         nearAccountId: result.nearAccountId,
         walletBalance,
+        stats: {
+          channelsJoined,
+          completedContributions,
+          missedContributions: 0, // Placeholder as requested
+        },
       },
     };
   }
@@ -317,6 +327,17 @@ export class AuthController {
       }, Device: ${deviceId.substring(0, 8)}...`,
     );
 
+    return this.authService.forgotPassword(dto, metadata);
+  }
+
+  @Public()
+  @Post("resend-reset-otp")
+  @HttpCode(HttpStatus.OK)
+  async resendResetOtp(
+    @Body() dto: ForgotPasswordDto,
+    @Req() request: FastifyRequest,
+  ) {
+    const metadata = this.extractSessionMetadata(request);
     return this.authService.forgotPassword(dto, metadata);
   }
 

@@ -95,4 +95,12 @@ export class TransactionRepository extends BaseRepository<TransactionDocument> {
 
     return result[0]?.total?.toString() || "0";
   }
+
+  async countUserCompletedContributions(userId: string): Promise<number> {
+    return this.count({
+      userId: new Types.ObjectId(userId),
+      type: TransactionType.CONTRIBUTION,
+      status: TransactionStatus.CONFIRMED,
+    } as FilterQuery<TransactionDocument>);
+  }
 }

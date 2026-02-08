@@ -6,12 +6,16 @@ import { AuthController } from "./controllers";
 import { SessionGuard, DeviceSessionGuard } from "./guards";
 import { UsersModule } from "../users";
 import { BlockchainModule } from "../blockchain";
+import { CirclesModule } from "../circles";
+import { TransactionsModule } from "../transactions";
 
 @Global()
 @Module({
   imports: [
     forwardRef(() => UsersModule),
     BlockchainModule,
+    forwardRef(() => CirclesModule),
+    TransactionsModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

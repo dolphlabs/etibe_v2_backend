@@ -9,7 +9,12 @@ import { Cache } from "cache-manager";
 import { UserRepository } from "../repositories";
 import { FilterQuery } from "../../../core/repositories";
 import { UserDocument } from "../schemas";
-import { CreateUserDto, UpdateUserDto, UserQueryDto } from "../dto";
+import {
+  CreateUserDto,
+  UpdateUserDto,
+  UpdateProfileDto,
+  UserQueryDto,
+} from "../dto";
 import { PaginatedResult, QueryOptions } from "../../../shared/types";
 import { CACHE_KEYS, CACHE_TTL } from "../../../shared/constants";
 
@@ -17,12 +22,12 @@ import { CACHE_KEYS, CACHE_TTL } from "../../../shared/constants";
 export class UserService {
   constructor(
     private readonly userRepository: UserRepository,
-    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
   async create(createUserDto: CreateUserDto): Promise<UserDocument> {
     const emailExists = await this.userRepository.emailExists(
-      createUserDto.email
+      createUserDto.email,
     );
     if (emailExists) {
       throw new ConflictException("Email already exists");
@@ -60,13 +65,13 @@ export class UserService {
 
   async findByEmail(
     email: string,
-    includePassword = false
+    includePassword = false,
   ): Promise<UserDocument | null> {
     return this.userRepository.findByEmail(email, includePassword);
   }
 
   async findAll(
-    queryDto: UserQueryDto
+    queryDto: UserQueryDto,
   ): Promise<PaginatedResult<UserDocument>> {
     const filter: FilterQuery<UserDocument> = {};
 
@@ -103,11 +108,11 @@ export class UserService {
 
   async update(
     id: string,
-    updateUserDto: UpdateUserDto
+    updateUserDto: UpdateUserDto,
   ): Promise<UserDocument> {
     const user = await this.userRepository.update(
       id,
-      updateUserDto as Partial<UserDocument>
+      updateUserDto as Partial<UserDocument>,
     );
     if (!user) {
       throw new NotFoundException("User not found");
@@ -116,6 +121,13 @@ export class UserService {
     await this.invalidateUserCache(id);
 
     return user;
+  }
+
+  async updateProfile(
+    id: string,
+    updateProfileDto: UpdateProfileDto,
+  ): Promise<UserDocument> {
+    return this.update(id, updateProfileDto as UpdateUserDto);
   }
 
   async softDelete(id: string): Promise<UserDocument> {
