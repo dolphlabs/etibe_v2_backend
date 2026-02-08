@@ -16,6 +16,9 @@ import {
   generatePayoutJobId,
   PAYOUT_JOB_OPTIONS,
 } from "../constants/payout.constants";
+import { NotificationService } from "../../notifications/services/notification.service";
+import { NotificationType } from "../../../shared/enums";
+import { Types } from "mongoose";
 
 @Injectable()
 export class PayoutSchedulerService implements OnModuleInit {
@@ -25,7 +28,8 @@ export class PayoutSchedulerService implements OnModuleInit {
     @InjectQueue(PAYOUT_QUEUE_NAME)
     private readonly payoutQueue: Queue<PayoutJobData>,
     private readonly circleRepository: CircleRepository,
-    private readonly userRepository: UserRepository
+    private readonly userRepository: UserRepository,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -41,19 +45,19 @@ export class PayoutSchedulerService implements OnModuleInit {
     payoutDates: Date[];
   }> {
     this.logger.log(
-      `Scheduling payouts for circle: ${circle._id}, status: ${circle.status}`
+      `Scheduling payouts for circle: ${circle._id}, status: ${circle.status}`,
     );
 
     const activeMembers = circle.members.filter((m) => m.status === "ACTIVE");
     if (activeMembers.length === 0) {
       this.logger.warn(
-        `Circle ${circle._id} has no active members, skipping payout scheduling`
+        `Circle ${circle._id} has no active members, skipping payout scheduling`,
       );
       return { scheduledPayouts: 0, payoutDates: [] };
     }
 
     const sortedMembers = [...activeMembers].sort(
-      (a, b) => a.position - b.position
+      (a, b) => a.position - b.position,
     );
 
     const totalRounds = sortedMembers.length;
@@ -61,11 +65,11 @@ export class PayoutSchedulerService implements OnModuleInit {
     const payoutDates = this.calculateAllPayoutDates(
       circle.startDate,
       circle.contributionSettings.frequency,
-      totalRounds
+      totalRounds,
     );
 
     const contributionAmount = parseFloat(
-      circle.contributionSettings.amount || "0"
+      circle.contributionSettings.amount || "0",
     );
     const payoutAmount = (contributionAmount * activeMembers.length).toString();
 
@@ -76,11 +80,11 @@ export class PayoutSchedulerService implements OnModuleInit {
       const recipient = sortedMembers[round - 1];
 
       const recipientUser = await this.userRepository.findById(
-        recipient.userId.toString()
+        recipient.userId.toString(),
       );
       if (!recipientUser?.nearAccountId) {
         this.logger.error(
-          `User ${recipient.userId} does not have a NEAR account, cannot schedule payout for round ${round}`
+          `User ${recipient.userId} does not have a NEAR account, cannot schedule payout for round ${round}`,
         );
         continue;
       }
@@ -118,8 +122,21 @@ export class PayoutSchedulerService implements OnModuleInit {
         this.logger.log(
           `Scheduled payout job ${jobId} for ${payoutDate.toISOString()}, recipient: ${
             recipientUser.nearAccountId
-          }, amount: ${payoutAmount} ${circle.contributionSettings.currency}`
+          }, amount: ${payoutAmount} ${circle.contributionSettings.currency}`,
         );
+
+        // Notify user
+        await this.notificationService.createNotification({
+          userId: recipientUser._id,
+          title: "Payout Scheduled",
+          content: `Your payout of ${payoutAmount} ${circle.contributionSettings.currency} from ${circle.name} has been scheduled for ${payoutDate.toLocaleDateString()}.`,
+          type: NotificationType.PAYOUT_SCHEDULED,
+          metadata: {
+            circleId: circle._id,
+            round,
+            scheduledDate: payoutDate,
+          },
+        });
       } catch (error) {
         this.logger.error(`Failed to schedule payout job ${jobId}:`, error);
       }
@@ -133,7 +150,7 @@ export class PayoutSchedulerService implements OnModuleInit {
     }
 
     this.logger.log(
-      `Scheduled ${scheduledJobs.length}/${totalRounds} payouts for circle ${circle._id}`
+      `Scheduled ${scheduledJobs.length}/${totalRounds} payouts for circle ${circle._id}`,
     );
 
     return {
@@ -145,7 +162,7 @@ export class PayoutSchedulerService implements OnModuleInit {
   private calculateAllPayoutDates(
     startDate: Date,
     frequency: PayoutFrequency,
-    totalRounds: number
+    totalRounds: number,
   ): Date[] {
     const dates: Date[] = [];
     let currentDate = new Date(startDate);
@@ -198,7 +215,7 @@ export class PayoutSchedulerService implements OnModuleInit {
     }
 
     this.logger.log(
-      `Cancelled ${cancelledCount} payout jobs for circle ${circleId}`
+      `Cancelled ${cancelledCount} payout jobs for circle ${circleId}`,
     );
     return cancelledCount;
   }
@@ -258,7 +275,7 @@ export class PayoutSchedulerService implements OnModuleInit {
 
       for (const circle of activeCircles) {
         const existingJobs = await this.getCirclePayoutSchedule(
-          circle._id.toString()
+          circle._id.toString(),
         );
         const pendingRounds = circle.members
           .filter((m) => m.status === "ACTIVE" && !m.hasReceivedPayout)
@@ -266,12 +283,12 @@ export class PayoutSchedulerService implements OnModuleInit {
 
         const scheduledRounds = existingJobs.map((j) => j.roundNumber);
         const missingRounds = pendingRounds.filter(
-          (r) => !scheduledRounds.includes(r)
+          (r) => !scheduledRounds.includes(r),
         );
 
         if (missingRounds.length > 0) {
           this.logger.warn(
-            `Circle ${circle._id} has ${missingRounds.length} missing payout jobs, rescheduling...`
+            `Circle ${circle._id} has ${missingRounds.length} missing payout jobs, rescheduling...`,
           );
           await this.scheduleCirclePayouts(circle);
         }

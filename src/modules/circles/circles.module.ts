@@ -2,15 +2,10 @@ import { Module, forwardRef } from "@nestjs/common";
 import { MongooseModule } from "@nestjs/mongoose";
 import { BullModule } from "@nestjs/bullmq";
 import { ConfigModule, ConfigService } from "@nestjs/config";
-import {
-  Circle,
-  CircleSchema,
-  Transaction,
-  TransactionSchema,
-  Invitation,
-  InvitationSchema,
-} from "./schemas";
-import { CircleRepository, TransactionRepository } from "./repositories";
+import { Circle, CircleSchema, Invitation, InvitationSchema } from "./schemas";
+import { CircleRepository } from "./repositories";
+import { TransactionsModule } from "../transactions";
+import { NotificationsModule } from "../notifications";
 import { CircleService, CircleMailService } from "./services";
 import { PayoutSchedulerService } from "./services/payout-scheduler.service";
 import { CircleController } from "./controllers";
@@ -25,7 +20,6 @@ import { PAYOUT_QUEUE_NAME } from "./constants/payout.constants";
   imports: [
     MongooseModule.forFeature([
       { name: Circle.name, schema: CircleSchema },
-      { name: Transaction.name, schema: TransactionSchema },
       { name: Invitation.name, schema: InvitationSchema },
     ]),
     BullModule.registerQueueAsync({
@@ -54,11 +48,12 @@ import { PAYOUT_QUEUE_NAME } from "./constants/payout.constants";
     }),
     BlockchainModule,
     forwardRef(() => UsersModule),
+    TransactionsModule,
+    NotificationsModule,
   ],
   controllers: [CircleController],
   providers: [
     CircleRepository,
-    TransactionRepository,
     CircleService,
     CircleMailService,
     PayoutSchedulerService,
@@ -70,7 +65,6 @@ import { PAYOUT_QUEUE_NAME } from "./constants/payout.constants";
     CircleService,
     CircleMailService,
     CircleRepository,
-    TransactionRepository,
     PayoutSchedulerService,
     VerifiedUserGuard,
   ],

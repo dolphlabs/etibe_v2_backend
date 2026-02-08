@@ -9,6 +9,7 @@ import helmet from "@fastify/helmet";
 import compress from "@fastify/compress";
 import rateLimit from "@fastify/rate-limit";
 import fastifyCookie from "@fastify/cookie";
+import multipart from "@fastify/multipart";
 import { Logger as PinoLogger } from "nestjs-pino";
 
 import { AppModule } from "./app.module";
@@ -28,7 +29,7 @@ async function bootstrap(): Promise<void> {
     fastifyAdapter,
     {
       bufferLogs: true,
-    }
+    },
   );
 
   const configService = app.get(ConfigService);
@@ -42,6 +43,16 @@ async function bootstrap(): Promise<void> {
       secure: configService.get("app.isProduction"),
       sameSite: "lax",
       path: "/",
+    },
+  });
+
+  await app.register(multipart, {
+    limits: {
+      fieldNameSize: 100, // Max field name size in bytes
+      fieldSize: 100, // Max field value size in bytes
+      fields: 10, // Max number of non-file fields
+      fileSize: 5 * 1024 * 1024, // 5MB max file size
+      files: 1, // Max number of file fields
     },
   });
 
@@ -80,7 +91,7 @@ async function bootstrap(): Promise<void> {
       statusCode: 429,
       error: "Too Many Requests",
       message: `Rate limit exceeded. Please retry after ${Math.round(
-        context.ttl / 1000
+        context.ttl / 1000,
       )} seconds.`,
     }),
   });
@@ -111,7 +122,7 @@ async function bootstrap(): Promise<void> {
       },
       disableErrorMessages: configService.get("app.isProduction"),
       stopAtFirstError: false,
-    })
+    }),
   );
 
   const apiPrefix = configService.get<string>("app.apiPrefix", "api");
@@ -151,7 +162,7 @@ async function bootstrap(): Promise<void> {
 
   logger.log(`Application is running on: http://localhost:${port}`);
   logger.log(
-    `API endpoint: http://localhost:${port}/${apiPrefix}/${apiVersion}`
+    `API endpoint: http://localhost:${port}/${apiPrefix}/${apiVersion}`,
   );
   logger.log(`Health check: http://localhost:${port}/health`);
   logger.log(`Environment: ${configService.get("app.nodeEnv")}`);

@@ -4,10 +4,6 @@ import { BullModule } from "@nestjs/bullmq";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 
 import { User, UserSchema } from "../users/schemas/user.schema";
-import {
-  Transaction,
-  TransactionSchema,
-} from "../circles/schemas/transaction.schema";
 import { WalletController } from "./controllers/wallet.controller";
 import { WalletService } from "./services/wallet.service";
 import { WithdrawalProcessor } from "./processors/withdrawal.processor";
@@ -15,6 +11,7 @@ import { BlockchainModule } from "../blockchain";
 import { AuthModule } from "../auth";
 import { CirclesModule } from "../circles";
 import { WITHDRAWAL_QUEUE_NAME } from "./constants/withdrawal.constants";
+import { Transaction, TransactionSchema } from "@modules/transactions";
 
 @Module({
   imports: [

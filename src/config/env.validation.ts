@@ -66,10 +66,19 @@ export class EnvironmentVariables {
 
   @IsString()
   CORS_ORIGIN: string = "*";
+
+  @IsString()
+  CLOUDINARY_SECRET!: string;
+
+  @IsString()
+  CLOUDINARY_CLOUD_NAME!: string;
+
+  @IsString()
+  CLOUDINARY_API_KEY!: string;
 }
 
 export function validate(
-  config: Record<string, unknown>
+  config: Record<string, unknown>,
 ): EnvironmentVariables {
   const validatedConfig = plainToInstance(EnvironmentVariables, config, {
     enableImplicitConversion: false,
@@ -92,7 +101,7 @@ export function validate(
       .join("\n");
 
     throw new Error(
-      `Environment configuration validation failed:\n${errorMessages}`
+      `Environment configuration validation failed:\n${errorMessages}`,
     );
   }
 

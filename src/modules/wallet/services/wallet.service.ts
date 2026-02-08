@@ -12,10 +12,6 @@ import { Model, Types } from "mongoose";
 import { Cache } from "cache-manager";
 
 import { User, UserDocument } from "../../users/schemas/user.schema";
-import {
-  Transaction,
-  TransactionDocument,
-} from "../../circles/schemas/transaction.schema";
 import { NearAccountService } from "../../blockchain/services/near-account.service";
 import { TokenService } from "../../blockchain/services/token.service";
 import { VaultService } from "../../blockchain/services/vault.service";
@@ -37,6 +33,7 @@ import {
   TransactionStatus,
   Currency,
 } from "../../../shared/enums/circle.enums";
+import { Transaction, TransactionDocument } from "@modules/transactions";
 
 interface WithdrawalOtpData {
   otp: string;
@@ -65,14 +62,14 @@ export class WalletService {
     private readonly nearAccountService: NearAccountService,
     private readonly tokenService: TokenService,
     private readonly vaultService: VaultService,
-    private readonly mailService: MailService
+    private readonly mailService: MailService,
   ) {}
 
   async requestWithdrawalOtp(
     userId: string,
     deviceId: string,
     asset: WithdrawalAsset,
-    amount: string
+    amount: string,
   ): Promise<{ success: boolean; message: string }> {
     const user = await this.userModel.findById(userId).lean();
     if (!user) {
@@ -102,7 +99,7 @@ export class WalletService {
     await this.cacheManager.set(
       key,
       otpData,
-      WITHDRAWAL_OTP_EXPIRY_SECONDS * 1000
+      WITHDRAWAL_OTP_EXPIRY_SECONDS * 1000,
     );
 
     await this.sendWithdrawalOtpEmail(
@@ -110,11 +107,11 @@ export class WalletService {
       user.firstName,
       otp,
       amount,
-      asset
+      asset,
     );
 
     this.logger.log(
-      `Withdrawal OTP requested for user ${userId}: ${amount} ${asset}`
+      `Withdrawal OTP requested for user ${userId}: ${amount} ${asset}`,
     );
 
     return {
@@ -127,7 +124,7 @@ export class WalletService {
     userId: string,
     deviceId: string,
     dto: WithdrawDto,
-    idempotencyKey: string
+    idempotencyKey: string,
   ): Promise<{
     transactionId: string;
     status: "PENDING" | "PROCESSING";
@@ -145,7 +142,7 @@ export class WalletService {
 
       if (existingTx) {
         this.logger.warn(
-          `Duplicate withdrawal request detected for user ${userId}, idempotency key: ${idempotencyKey}`
+          `Duplicate withdrawal request detected for user ${userId}, idempotency key: ${idempotencyKey}`,
         );
         return {
           transactionId: existingTx._id.toString(),
@@ -169,13 +166,13 @@ export class WalletService {
 
     if (!user.nearAccountId) {
       throw new BadRequestException(
-        "NEAR wallet not set up. Please complete onboarding."
+        "NEAR wallet not set up. Please complete onboarding.",
       );
     }
 
     if (!user.nearEncryptedPrivateKey) {
       throw new BadRequestException(
-        "Wallet not configured for withdrawals. Please contact support."
+        "Wallet not configured for withdrawals. Please contact support.",
       );
     }
 
@@ -184,7 +181,7 @@ export class WalletService {
       dto.otp,
       deviceId,
       dto.asset,
-      dto.amount
+      dto.amount,
     );
 
     this.validateWithdrawalAmount(dto.amount, dto.asset);
@@ -193,7 +190,7 @@ export class WalletService {
 
     const validation = await this.tokenService.validateWithdrawal(
       dto.asset,
-      dto.destinationAddress
+      dto.destinationAddress,
     );
 
     if (!validation.valid) {
@@ -216,7 +213,7 @@ export class WalletService {
     });
 
     this.logger.log(
-      `Created PENDING withdrawal transaction ${transaction._id} for user ${userId}`
+      `Created PENDING withdrawal transaction ${transaction._id} for user ${userId}`,
     );
 
     const jobData: WithdrawalJobData = {
@@ -236,7 +233,7 @@ export class WalletService {
     });
 
     this.logger.log(
-      `Queued withdrawal job ${existingJobId} for transaction ${transaction._id}`
+      `Queued withdrawal job ${existingJobId} for transaction ${transaction._id}`,
     );
 
     return {
@@ -252,7 +249,7 @@ export class WalletService {
     otp: string,
     deviceId: string,
     asset: string,
-    amount: string
+    amount: string,
   ): Promise<void> {
     const normalizedEmail = email.toLowerCase();
     const key = `${WITHDRAWAL_OTP_PREFIX}${normalizedEmail}`;
@@ -261,7 +258,7 @@ export class WalletService {
     const attempts = await this.cacheManager.get<number>(attemptsKey);
     if (attempts && attempts >= WITHDRAWAL_OTP_MAX_ATTEMPTS) {
       throw new BadRequestException(
-        "Too many failed attempts. Please request a new verification code."
+        "Too many failed attempts. Please request a new verification code.",
       );
     }
 
@@ -269,29 +266,29 @@ export class WalletService {
 
     if (!otpData) {
       throw new BadRequestException(
-        "Verification code expired or not found. Please request a new one."
+        "Verification code expired or not found. Please request a new one.",
       );
     }
 
     if (Date.now() > otpData.expiresAt) {
       await this.cacheManager.del(key);
       throw new BadRequestException(
-        "Verification code has expired. Please request a new one."
+        "Verification code has expired. Please request a new one.",
       );
     }
 
     if (otpData.asset !== asset || otpData.amount !== amount) {
       throw new BadRequestException(
-        "Verification code was issued for a different withdrawal. Please request a new code."
+        "Verification code was issued for a different withdrawal. Please request a new code.",
       );
     }
 
     if (otpData.deviceId !== deviceId) {
       this.logger.warn(
-        `Device mismatch for withdrawal OTP: ${email}. Expected: ${otpData.deviceId}, Got: ${deviceId}`
+        `Device mismatch for withdrawal OTP: ${email}. Expected: ${otpData.deviceId}, Got: ${deviceId}`,
       );
       throw new BadRequestException(
-        "Please verify from the same device you requested the code from."
+        "Please verify from the same device you requested the code from.",
       );
     }
 
@@ -303,12 +300,12 @@ export class WalletService {
       if (remaining <= 0) {
         await this.cacheManager.del(key);
         throw new BadRequestException(
-          "Too many failed attempts. Please request a new verification code."
+          "Too many failed attempts. Please request a new verification code.",
         );
       }
 
       throw new BadRequestException(
-        `Invalid verification code. ${remaining} attempt(s) remaining.`
+        `Invalid verification code. ${remaining} attempt(s) remaining.`,
       );
     }
 
@@ -318,7 +315,7 @@ export class WalletService {
 
   private validateWithdrawalAmount(
     amount: string,
-    asset: WithdrawalAsset
+    asset: WithdrawalAsset,
   ): void {
     const numAmount = parseFloat(amount);
 
@@ -331,13 +328,13 @@ export class WalletService {
 
     if (numAmount < minAmount) {
       throw new BadRequestException(
-        `Minimum withdrawal amount for ${asset} is ${minAmount}`
+        `Minimum withdrawal amount for ${asset} is ${minAmount}`,
       );
     }
 
     if (numAmount > maxAmount) {
       throw new BadRequestException(
-        `Maximum withdrawal amount for ${asset} is ${maxAmount} per transaction`
+        `Maximum withdrawal amount for ${asset} is ${maxAmount} per transaction`,
       );
     }
   }
@@ -345,46 +342,44 @@ export class WalletService {
   private async checkAvailableBalance(
     nearAccountId: string,
     asset: WithdrawalAsset,
-    amount: string
+    amount: string,
   ): Promise<void> {
     const numAmount = parseFloat(amount);
 
     if (asset === "NEAR") {
-      const balance = await this.nearAccountService.getAccountBalance(
-        nearAccountId
-      );
+      const balance =
+        await this.nearAccountService.getAccountBalance(nearAccountId);
       const availableBalance = parseFloat(balance.available || "0");
 
       if (availableBalance < numAmount + 0.01) {
         throw new BadRequestException(
           `Insufficient NEAR balance. Available: ${availableBalance.toFixed(
-            4
-          )} NEAR`
+            4,
+          )} NEAR`,
         );
       }
     } else {
       const tokenBalance = await this.nearAccountService.getTokenBalance(
         nearAccountId,
-        asset
+        asset,
       );
       const availableBalance = parseFloat(tokenBalance);
 
       if (availableBalance < numAmount) {
         throw new BadRequestException(
           `Insufficient ${asset} balance. Available: ${availableBalance.toFixed(
-            2
-          )} ${asset}`
+            2,
+          )} ${asset}`,
         );
       }
 
-      const nearBalance = await this.nearAccountService.getAccountBalance(
-        nearAccountId
-      );
+      const nearBalance =
+        await this.nearAccountService.getAccountBalance(nearAccountId);
       const availableNear = parseFloat(nearBalance.available || "0");
 
       if (availableNear < 0.01) {
         throw new BadRequestException(
-          `Insufficient NEAR for transaction fees. Please deposit at least 0.01 NEAR.`
+          `Insufficient NEAR for transaction fees. Please deposit at least 0.01 NEAR.`,
         );
       }
     }
@@ -395,7 +390,7 @@ export class WalletService {
     firstName: string,
     otp: string,
     amount: string,
-    asset: string
+    asset: string,
   ): Promise<void> {
     try {
       const { Resend } = await import("resend");
@@ -418,10 +413,10 @@ export class WalletService {
       this.logger.log(`Withdrawal OTP email sent to ${email}`);
     } catch (error: any) {
       this.logger.error(
-        `Failed to send withdrawal OTP email: ${error.message}`
+        `Failed to send withdrawal OTP email: ${error.message}`,
       );
       throw new BadRequestException(
-        "Failed to send verification email. Please try again."
+        "Failed to send verification email. Please try again.",
       );
     }
   }
@@ -532,7 +527,7 @@ export class WalletService {
 
   async getWithdrawalHistory(
     userId: string,
-    options?: { asset?: string; page?: number; limit?: number }
+    options?: { asset?: string; page?: number; limit?: number },
   ): Promise<{
     withdrawals: TransactionDocument[];
     total: number;
@@ -573,7 +568,7 @@ export class WalletService {
 
   async getWithdrawalById(
     userId: string,
-    transactionId: string
+    transactionId: string,
   ): Promise<TransactionDocument | null> {
     return this.transactionModel
       .findOne({

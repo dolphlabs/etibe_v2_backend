@@ -19,6 +19,7 @@ import {
   sessionConfig,
   resendConfig,
   vaultConfig,
+  cloudinaryConfig,
 } from "./config";
 import {
   GlobalExceptionFilter,
@@ -34,6 +35,9 @@ import { AuthModule } from "./modules/auth";
 import { CirclesModule } from "./modules/circles";
 import { BlockchainModule } from "./modules/blockchain";
 import { WalletModule } from "./modules/wallet";
+import { UtilitiesModule } from "./modules/utilities";
+import { TransactionsModule } from "./modules/transactions";
+import { NotificationsModule } from "./modules/notifications";
 
 @Module({
   imports: [
@@ -50,6 +54,7 @@ import { WalletModule } from "./modules/wallet";
         sessionConfig,
         resendConfig,
         vaultConfig,
+        cloudinaryConfig,
       ],
       envFilePath: [".env.local", ".env"],
       expandVariables: true,
@@ -150,6 +155,9 @@ import { WalletModule } from "./modules/wallet";
     CirclesModule,
     BlockchainModule,
     WalletModule,
+    UtilitiesModule,
+    TransactionsModule,
+    NotificationsModule,
   ],
   providers: [
     {

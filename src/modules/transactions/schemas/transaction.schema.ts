@@ -2,10 +2,10 @@ import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
 import { Document, Types, Schema as MongooseSchema } from "mongoose";
 import { COLLECTION_NAMES } from "../../../shared/constants";
 import {
+  Currency,
   TransactionType,
   TransactionStatus,
-  Currency,
-} from "../../../shared/enums/circle.enums";
+} from "../../../shared/enums";
 
 export interface TransactionDocument extends Document {
   _id: Types.ObjectId;
@@ -21,6 +21,8 @@ export interface TransactionDocument extends Document {
   metadata?: Record<string, unknown>;
   failureReason?: string;
   confirmedAt?: Date;
+  deletedAt?: Date;
+  isDeleted: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -35,6 +37,9 @@ export interface TransactionDocument extends Document {
       delete ret.__v;
       return ret;
     },
+  },
+  toObject: {
+    virtuals: true,
   },
 })
 export class Transaction {
@@ -72,18 +77,21 @@ export class Transaction {
     required: true,
     type: MongooseSchema.Types.Decimal128,
     get: (v: Types.Decimal128) => v?.toString(),
+    // Set to handle string input and convert to Decimal128
+    set: (v: string | number) => v,
   })
   amount!: string;
 
   @Prop({
     required: true,
     enum: Currency,
-    default: Currency.USDT,
+    default: Currency.USDC,
   })
   currency!: Currency;
 
   @Prop({
     min: 0,
+    index: true,
   })
   round?: number;
 
@@ -113,6 +121,12 @@ export class Transaction {
     index: true,
   })
   confirmedAt?: Date;
+
+  @Prop({ default: null, index: true })
+  deletedAt?: Date;
+
+  @Prop({ default: false })
+  isDeleted!: boolean;
 }
 
 export const TransactionSchema = SchemaFactory.createForClass(Transaction);

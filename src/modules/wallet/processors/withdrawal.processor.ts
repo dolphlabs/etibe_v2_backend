@@ -9,10 +9,6 @@ import { ConfigService } from "@nestjs/config";
 import sha256 from "js-sha256";
 
 import { User, UserDocument } from "../../users/schemas/user.schema";
-import {
-  Transaction,
-  TransactionDocument,
-} from "../../circles/schemas/transaction.schema";
 import { NearAccountService } from "../../blockchain/services/near-account.service";
 import {
   VaultService,
@@ -32,6 +28,7 @@ import {
   TransactionStatus,
   Currency,
 } from "../../../shared/enums/circle.enums";
+import { Transaction, TransactionDocument } from "@modules/transactions";
 
 @Processor(WITHDRAWAL_QUEUE_NAME, {
   concurrency: 2,
@@ -54,20 +51,20 @@ export class WithdrawalProcessor extends WorkerHost {
     private readonly vaultService: VaultService,
     private readonly tokenService: TokenService,
     private readonly eventEmitter: EventEmitter2,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
   ) {
     super();
 
     this.networkId = this.configService.get<string>(
       "near.networkId",
-      "testnet"
+      "testnet",
     );
 
     const nodeUrl = this.configService.get<string>(
       "near.nodeUrl",
       this.networkId === "mainnet"
         ? "https://rpc.mainnet.near.org"
-        : "https://rpc.testnet.near.org"
+        : "https://rpc.testnet.near.org",
     );
 
     this.provider = new providers.JsonRpcProvider({ url: nodeUrl });
@@ -78,7 +75,7 @@ export class WithdrawalProcessor extends WorkerHost {
     const startTime = Date.now();
 
     this.logger.log(
-      `[WITHDRAWAL_START] Processing job ${job.id} - User: ${data.userId}, Amount: ${data.amount} ${data.asset} -> ${data.destinationAddress}`
+      `[WITHDRAWAL_START] Processing job ${job.id} - User: ${data.userId}, Amount: ${data.amount} ${data.asset} -> ${data.destinationAddress}`,
     );
 
     // Emit processing event for WebSocket
@@ -95,7 +92,7 @@ export class WithdrawalProcessor extends WorkerHost {
       }
 
       const transaction = await this.transactionModel.findById(
-        data.transactionId
+        data.transactionId,
       );
       if (!transaction) {
         throw new Error("Transaction record not found");
@@ -125,7 +122,7 @@ export class WithdrawalProcessor extends WorkerHost {
 
       const duration = Date.now() - startTime;
       this.logger.log(
-        `[WITHDRAWAL_SUCCESS] Job ${job.id} completed in ${duration}ms - txHash: ${txHash}`
+        `[WITHDRAWAL_SUCCESS] Job ${job.id} completed in ${duration}ms - txHash: ${txHash}`,
       );
 
       // Emit success event for WebSocket/notifications
@@ -135,7 +132,7 @@ export class WithdrawalProcessor extends WorkerHost {
     } catch (error: any) {
       const duration = Date.now() - startTime;
       this.logger.error(
-        `[WITHDRAWAL_ERROR] Job ${job.id} failed after ${duration}ms - Error: ${error.message}`
+        `[WITHDRAWAL_ERROR] Job ${job.id} failed after ${duration}ms - Error: ${error.message}`,
       );
 
       // Update transaction status to FAILED
@@ -149,7 +146,7 @@ export class WithdrawalProcessor extends WorkerHost {
   }
 
   private async getUserWithPrivateKey(
-    userId: string
+    userId: string,
   ): Promise<UserDocument | null> {
     return this.userModel
       .findById(userId)
@@ -160,12 +157,12 @@ export class WithdrawalProcessor extends WorkerHost {
 
   private async executeWithdrawal(
     user: UserDocument,
-    data: WithdrawalJobData
+    data: WithdrawalJobData,
   ): Promise<string> {
     const { asset, amount, destinationAddress, requiresStorageDeposit } = data;
 
     const userKeyPair = this.nearAccountService.decryptAndGetKeyPair(
-      user.nearEncryptedPrivateKey as EncryptedData
+      user.nearEncryptedPrivateKey as EncryptedData,
     );
     const userPublicKey = userKeyPair.getPublicKey();
 
@@ -180,7 +177,7 @@ export class WithdrawalProcessor extends WorkerHost {
     const nonce = (accessKeyResponse as any).nonce + 1;
     const status = await this.provider.status();
     const blockHash = utils.serialize.base_decode(
-      status.sync_info.latest_block_hash
+      status.sync_info.latest_block_hash,
     );
 
     let receiverId: string;
@@ -192,7 +189,7 @@ export class WithdrawalProcessor extends WorkerHost {
       actions = [this.tokenService.buildNearTransferAction(atomicAmount)];
 
       this.logger.log(
-        `Executing NEAR transfer: ${amount} NEAR (${atomicAmount} yoctoNEAR) to ${destinationAddress}`
+        `Executing NEAR transfer: ${amount} NEAR (${atomicAmount} yoctoNEAR) to ${destinationAddress}`,
       );
     } else {
       const tokenContractId = this.tokenService.getTokenContractId(asset);
@@ -211,7 +208,7 @@ export class WithdrawalProcessor extends WorkerHost {
       this.logger.log(
         `Executing ${asset} transfer: ${amount} (${atomicAmount} atomic) to ${destinationAddress}${
           requiresStorageDeposit ? " (with storage deposit)" : ""
-        }`
+        }`,
       );
     }
 
@@ -221,12 +218,12 @@ export class WithdrawalProcessor extends WorkerHost {
       receiverId,
       nonce,
       actions,
-      blockHash
+      blockHash,
     );
 
     const serializedTx = utils.serialize.serialize(
       transactions.SCHEMA.Transaction,
-      transaction
+      transaction,
     );
 
     const hash = new Uint8Array(sha256.sha256.array(serializedTx));
@@ -256,7 +253,7 @@ export class WithdrawalProcessor extends WorkerHost {
       "Failure" in result.status
     ) {
       throw new Error(
-        `Transaction failed on-chain: ${JSON.stringify(result.status)}`
+        `Transaction failed on-chain: ${JSON.stringify(result.status)}`,
       );
     }
 
@@ -271,7 +268,7 @@ export class WithdrawalProcessor extends WorkerHost {
   @OnWorkerEvent("completed")
   onCompleted(job: Job<WithdrawalJobData>, result: WithdrawalResult) {
     this.logger.log(
-      `Withdrawal job ${job.id} completed successfully - txHash: ${result.txHash}`
+      `Withdrawal job ${job.id} completed successfully - txHash: ${result.txHash}`,
     );
   }
 
@@ -283,7 +280,7 @@ export class WithdrawalProcessor extends WorkerHost {
     const maxAttempts = WITHDRAWAL_RETRY_CONFIG.maxAttempts;
 
     this.logger.error(
-      `Withdrawal job ${job.id} failed (attempt ${attemptsMade}/${maxAttempts}): ${error.message}`
+      `Withdrawal job ${job.id} failed (attempt ${attemptsMade}/${maxAttempts}): ${error.message}`,
     );
 
     if (attemptsMade >= maxAttempts) {
@@ -298,7 +295,7 @@ export class WithdrawalProcessor extends WorkerHost {
 
   private async triggerWithdrawalFailureAlert(
     data: WithdrawalJobData,
-    error: Error
+    error: Error,
   ): Promise<void> {
     const alertPayload = {
       type: "WITHDRAWAL_FAILURE",
@@ -316,7 +313,7 @@ export class WithdrawalProcessor extends WorkerHost {
     this.logger.error(
       `[CRITICAL_ALERT] Withdrawal failed after ${
         WITHDRAWAL_RETRY_CONFIG.maxAttempts
-      } retries: ${JSON.stringify(alertPayload)}`
+      } retries: ${JSON.stringify(alertPayload)}`,
     );
 
     // Emit failure event for notification service

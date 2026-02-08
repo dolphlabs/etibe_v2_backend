@@ -13,10 +13,11 @@ import { EventEmitter2 } from "@nestjs/event-emitter";
 import { Types } from "mongoose";
 import { nanoid } from "nanoid";
 import { CircleRepository } from "../repositories/circle.repository";
-import { TransactionRepository } from "../repositories/transaction.repository";
+import { TransactionRepository } from "../../transactions/repositories/transaction.repository";
 import { NearService } from "../../blockchain/services/near.service";
 import { NearAccountService } from "../../blockchain/services/near-account.service";
-import { CircleDocument, TransactionDocument } from "../schemas";
+import { CircleDocument } from "../schemas";
+import { TransactionDocument } from "../../transactions/schemas/transaction.schema";
 import {
   CreateCircleDto,
   JoinCircleDto,
@@ -40,7 +41,9 @@ import {
 } from "../../../shared/constants";
 import { UserRepository } from "../../users/repositories";
 import { CircleMailService } from "./circle-mail.service";
+import { NotificationService } from "../../notifications/services/notification.service";
 import { CIRCLE_EVENTS } from "../constants/payout.constants";
+import { NotificationType } from "../../../shared/enums";
 
 @Injectable()
 export class CircleService {
@@ -53,19 +56,20 @@ export class CircleService {
     private readonly nearService: NearService,
     private readonly nearAccountService: NearAccountService,
     private readonly circleMailService: CircleMailService,
+    private readonly notificationService: NotificationService,
     private readonly eventEmitter: EventEmitter2,
-    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
   async createCircle(
     creatorId: string,
-    dto: CreateCircleDto
+    dto: CreateCircleDto,
   ): Promise<CircleDocument> {
     const creator = await this.userRepository.findById(creatorId);
 
     if (!creator?.nearAccountId) {
       throw new BadRequestException(
-        "You need a verified NEAR account to create a circle"
+        "You need a verified NEAR account to create a circle",
       );
     }
 
@@ -75,7 +79,7 @@ export class CircleService {
     const startDate = new Date(dto.startDate);
     const nextPayoutDate = this.calculateNextPayoutDate(
       startDate,
-      dto.contributionSettings.frequency
+      dto.contributionSettings.frequency,
     );
 
     const circle = await this.circleRepository.create({
@@ -119,7 +123,7 @@ export class CircleService {
       creator.firstName,
       circle.name,
       circle.inviteCode,
-      circle.inviteLink || ""
+      circle.inviteLink || "",
     );
 
     await this.invalidateUserCirclesCache(creatorId);
@@ -129,7 +133,7 @@ export class CircleService {
 
   async activateCircle(
     circleId: string,
-    userId: string
+    userId: string,
   ): Promise<{
     circle: CircleDocument;
     contractAddress: string;
@@ -143,14 +147,14 @@ export class CircleService {
 
     if (circle.status !== CircleStatus.PENDING) {
       throw new BadRequestException(
-        `Circle is in ${circle.status} status, cannot activate`
+        `Circle is in ${circle.status} status, cannot activate`,
       );
     }
 
     const creator = await this.userRepository.findById(userId);
     if (!creator?.nearAccountId) {
       throw new BadRequestException(
-        "Creator must have a NEAR account to activate the circle"
+        "Creator must have a NEAR account to activate the circle",
       );
     }
 
@@ -165,7 +169,7 @@ export class CircleService {
         circle.contributionSettings.currency,
         circle.contributionSettings.frequency,
         circle.maxMembers,
-        circle.contributionSettings.gracePeriodDays
+        circle.contributionSettings.gracePeriodDays,
       );
 
     // Update circle with contract address and activate
@@ -179,7 +183,7 @@ export class CircleService {
     }
 
     this.logger.log(
-      `Circle ${circleId} activated with contract ${contractAddress}, txHash: ${txHash}`
+      `Circle ${circleId} activated with contract ${contractAddress}, txHash: ${txHash}`,
     );
 
     await this.invalidateCircleCache(circleId);
@@ -222,7 +226,7 @@ export class CircleService {
 
   async getUserCircles(
     userId: string,
-    status?: string
+    status?: string,
   ): Promise<CircleDocument[]> {
     const cacheKey = `${CACHE_KEYS.USER_CIRCLES}:${userId}:${status || "all"}`;
     const cached = await this.cacheManager.get<CircleDocument[]>(cacheKey);
@@ -244,7 +248,7 @@ export class CircleService {
 
   async getCircleDashboard(
     circleId: string,
-    userId: string
+    userId: string,
   ): Promise<CircleDashboardDto> {
     const circle = await this.getCircleById(circleId);
     const activeMembers = circle.members.filter((m) => m.status === "ACTIVE");
@@ -254,7 +258,7 @@ export class CircleService {
 
     // Calculate stats
     const contributionAmount = parseFloat(
-      circle.contributionSettings.amount || "0"
+      circle.contributionSettings.amount || "0",
     );
     const targetAmount = activeMembers.length * contributionAmount;
     const collected = parseFloat(circle.totalContributed || "0");
@@ -267,7 +271,7 @@ export class CircleService {
       membersContributed:
         await this.transactionRepository.countRoundContributions(
           circleId,
-          circle.currentRound
+          circle.currentRound,
         ),
       totalMembers: activeMembers.length,
     };
@@ -280,7 +284,7 @@ export class CircleService {
     let nextRecipient: NextRecipientDto | null = null;
     if (nextRecipientMember) {
       const memberUser = memberDetails.find(
-        (m) => m.userId === nextRecipientMember.userId.toString()
+        (m) => m.userId === nextRecipientMember.userId.toString(),
       );
       if (memberUser) {
         nextRecipient = {
@@ -299,7 +303,7 @@ export class CircleService {
       circle.startDate,
       circle.currentRound,
       circle.contributionSettings.frequency,
-      circle.contributionSettings.gracePeriodDays
+      circle.contributionSettings.gracePeriodDays,
     );
 
     // Get recent activity
@@ -310,7 +314,7 @@ export class CircleService {
       await this.transactionRepository.hasUserContributedThisRound(
         userId,
         circleId,
-        circle.currentRound
+        circle.currentRound,
       );
 
     // Map payout order
@@ -322,7 +326,7 @@ export class CircleService {
           activeMembers.find((am) => am.userId.toString() === m.userId)
             ?.hasReceivedPayout || false,
         payoutDate: activeMembers.find(
-          (am) => am.userId.toString() === m.userId
+          (am) => am.userId.toString() === m.userId,
         )?.payoutDate,
         joinedAt:
           activeMembers.find((am) => am.userId.toString() === m.userId)
@@ -370,18 +374,18 @@ export class CircleService {
   async joinCircle(
     userId: string,
     userNearAccountId: string,
-    dto: JoinCircleDto
+    dto: JoinCircleDto,
   ): Promise<CircleDocument> {
     let circle: CircleDocument | null;
 
     if (dto.channelAddress) {
       circle = await this.circleRepository.findByContractAddress(
-        dto.channelAddress
+        dto.channelAddress,
       );
 
       if (!circle) {
         throw new NotFoundException(
-          "Circle not found for this channel address"
+          "Circle not found for this channel address",
         );
       }
 
@@ -389,12 +393,12 @@ export class CircleService {
       if (userNearAccountId) {
         const isWhitelisted = await this.nearService.isUserWhitelisted(
           dto.channelAddress,
-          userNearAccountId
+          userNearAccountId,
         );
 
         if (!isWhitelisted) {
           throw new BadRequestException(
-            "Your NEAR account is not whitelisted for this circle"
+            "Your NEAR account is not whitelisted for this circle",
           );
         }
       }
@@ -406,7 +410,7 @@ export class CircleService {
       }
     } else {
       throw new BadRequestException(
-        "Either invite code or channel address is required"
+        "Either invite code or channel address is required",
       );
     }
 
@@ -420,7 +424,7 @@ export class CircleService {
     }
 
     const isAlreadyMember = circle.members.some(
-      (m) => m.userId.toString() === userId && m.status === "ACTIVE"
+      (m) => m.userId.toString() === userId && m.status === "ACTIVE",
     );
 
     if (isAlreadyMember) {
@@ -435,12 +439,25 @@ export class CircleService {
         userId: new Types.ObjectId(userId),
         position: nextPosition,
         status: "ACTIVE",
-      }
+      },
     );
 
     if (!updatedCircle) {
       throw new BadRequestException("Failed to join circle");
     }
+
+    // Record join transaction
+    await this.transactionRepository.create({
+      type: TransactionType.JOINED_CHANNEL,
+      status: TransactionStatus.COMPLETED,
+      userId: new Types.ObjectId(userId),
+      circleId: circle._id,
+      amount: "0",
+      currency: circle.contributionSettings.currency,
+      metadata: {
+        position: nextPosition,
+      },
+    });
 
     // Send notification emails
     const newMember = await this.userRepository.findById(userId);
@@ -448,7 +465,7 @@ export class CircleService {
       // Notify all existing members
       for (const member of activeMembers) {
         const memberUser = await this.userRepository.findById(
-          member.userId.toString()
+          member.userId.toString(),
         );
         if (memberUser) {
           await this.circleMailService.sendMemberJoinedEmail(
@@ -456,8 +473,19 @@ export class CircleService {
             memberUser.firstName,
             circle.name,
             newMember.firstName,
-            newMember.lastName
+            newMember.lastName,
           );
+
+          await this.notificationService.createNotification({
+            userId: memberUser._id,
+            title: "New Member Joined",
+            content: `${newMember.firstName} ${newMember.lastName} has joined ${circle.name}.`,
+            type: NotificationType.MEMBER_JOINED,
+            metadata: {
+              circleId: circle._id,
+              newMemberId: newMember._id,
+            },
+          });
         }
       }
     }
@@ -472,7 +500,7 @@ export class CircleService {
 
   async makeContribution(
     circleId: string,
-    userId: string
+    userId: string,
   ): Promise<TransactionDocument> {
     const circle = await this.getCircleById(circleId);
 
@@ -493,12 +521,12 @@ export class CircleService {
 
     if (!user.nearEncryptedPrivateKey) {
       throw new BadRequestException(
-        "Your wallet is not set up for automatic contributions. Please contact support."
+        "Your wallet is not set up for automatic contributions. Please contact support.",
       );
     }
 
     const isMember = circle.members.some(
-      (m) => m.userId.toString() === userId && m.status === "ACTIVE"
+      (m) => m.userId.toString() === userId && m.status === "ACTIVE",
     );
     if (!isMember) {
       throw new BadRequestException("You must be a member to contribute");
@@ -508,7 +536,7 @@ export class CircleService {
       await this.transactionRepository.hasUserContributedThisRound(
         userId,
         circleId,
-        circle.currentRound
+        circle.currentRound,
       );
     if (alreadyContributed) {
       throw new ConflictException("You have already contributed this round");
@@ -519,7 +547,7 @@ export class CircleService {
 
     if (!circle.contractAddress) {
       throw new BadRequestException(
-        "Circle contract not deployed. Please activate the circle first."
+        "Circle contract not deployed. Please activate the circle first.",
       );
     }
 
@@ -528,24 +556,24 @@ export class CircleService {
         const isRegistered =
           await this.nearAccountService.ensureTokenRegistration(
             user.nearAccountId,
-            currency as "USDT" | "USDC"
+            currency as "USDT" | "USDC",
           );
 
         if (!isRegistered) {
           this.logger.warn(
-            `Failed to register ${user.nearAccountId} with ${currency} contract, proceeding anyway...`
+            `Failed to register ${user.nearAccountId} with ${currency} contract, proceeding anyway...`,
           );
         }
       } catch (error: any) {
         this.logger.warn(
-          `Token registration check failed for ${user.nearAccountId}: ${error.message}`
+          `Token registration check failed for ${user.nearAccountId}: ${error.message}`,
         );
         // Don't throw - the contribution might still work if already registered
       }
     }
 
     this.logger.log(
-      `Executing contribution: ${amount} ${currency} from ${user.nearAccountId} for circle ${circle.name}`
+      `Executing contribution: ${amount} ${currency} from ${user.nearAccountId} for circle ${circle.name}`,
     );
 
     const { txHash } = await this.nearAccountService.executeContribution(
@@ -553,7 +581,7 @@ export class CircleService {
       user.nearEncryptedPrivateKey,
       circle.contractAddress,
       amount,
-      currency
+      currency,
     );
 
     const transaction = await this.transactionRepository.create({
@@ -577,11 +605,25 @@ export class CircleService {
       circle.name,
       amount,
       currency,
-      circle.currentRound
+      circle.currentRound,
     );
 
+    // Create notification
+    await this.notificationService.createNotification({
+      userId: new Types.ObjectId(userId),
+      title: "Contribution Successful",
+      content: `Your contribution of ${amount} ${currency} to ${circle.name} was confirmed on-chain.`,
+      type: NotificationType.CONTRIBUTION_SUCCESS,
+      metadata: {
+        circleId: circle._id,
+        txHash,
+        amount,
+        currency,
+      },
+    });
+
     this.logger.log(
-      `Contribution completed: ${amount} ${currency} to ${circle.name} by ${user.firstName}, txHash: ${txHash}`
+      `Contribution completed: ${amount} ${currency} to ${circle.name} by ${user.firstName}, txHash: ${txHash}`,
     );
 
     await this.invalidateCircleCache(circleId);
@@ -597,7 +639,7 @@ export class CircleService {
     userId: string,
     nearAccountId: string,
     transactionHash: string,
-    amount: string
+    amount: string,
   ): Promise<TransactionDocument> {
     const circle = await this.getCircleById(circleId);
 
@@ -606,9 +648,8 @@ export class CircleService {
     }
 
     // Check for duplicate transaction hash
-    const existing = await this.transactionRepository.findByHash(
-      transactionHash
-    );
+    const existing =
+      await this.transactionRepository.findByHash(transactionHash);
     if (existing) {
       throw new ConflictException("Transaction already recorded");
     }
@@ -617,7 +658,7 @@ export class CircleService {
     const verification = await this.nearService.verifyContribution(
       transactionHash,
       circle.contractAddress!,
-      amount
+      amount,
     );
 
     if (!verification.isValid) {
@@ -650,12 +691,12 @@ export class CircleService {
         circle.name,
         amount,
         circle.contributionSettings.currency,
-        circle.currentRound
+        circle.currentRound,
       );
     }
 
     this.logger.log(
-      `Contribution recorded: ${amount} ${circle.contributionSettings.currency} to ${circle.name}`
+      `Contribution recorded: ${amount} ${circle.contributionSettings.currency} to ${circle.name}`,
     );
 
     await this.invalidateCircleCache(circleId);
@@ -667,13 +708,13 @@ export class CircleService {
     circleId: string,
     inviterId: string,
     inviteeEmail?: string,
-    inviteeUserId?: string
+    inviteeUserId?: string,
   ): Promise<{ inviteCode: string }> {
     const circle = await this.getCircleById(circleId);
 
     // Verify inviter is a member
     const isMember = circle.members.some(
-      (m) => m.userId.toString() === inviterId && m.status === "ACTIVE"
+      (m) => m.userId.toString() === inviterId && m.status === "ACTIVE",
     );
 
     if (!isMember) {
@@ -689,7 +730,7 @@ export class CircleService {
         inviter.lastName,
         circle.name,
         circle.inviteCode,
-        circle.inviteLink || ""
+        circle.inviteLink || "",
       );
     }
 
@@ -711,21 +752,21 @@ export class CircleService {
 
     if (filters.currency) {
       filtered = filtered.filter(
-        (c) => c.contributionSettings.currency === filters.currency
+        (c) => c.contributionSettings.currency === filters.currency,
       );
     }
 
     if (filters.minAmount) {
       const min = parseFloat(filters.minAmount);
       filtered = filtered.filter(
-        (c) => parseFloat(c.contributionSettings.amount) >= min
+        (c) => parseFloat(c.contributionSettings.amount) >= min,
       );
     }
 
     if (filters.maxAmount) {
       const max = parseFloat(filters.maxAmount);
       filtered = filtered.filter(
-        (c) => parseFloat(c.contributionSettings.amount) <= max
+        (c) => parseFloat(c.contributionSettings.amount) <= max,
       );
     }
 
@@ -733,7 +774,7 @@ export class CircleService {
   }
 
   async getContributionProgress(
-    circleId: string
+    circleId: string,
   ): Promise<ContributionProgress & { percentage: number }> {
     const circle = await this.getCircleById(circleId);
     const activeMembers = circle.members.filter((m) => m.status === "ACTIVE");
@@ -741,17 +782,17 @@ export class CircleService {
     const contributedCount =
       await this.transactionRepository.countRoundContributions(
         circleId,
-        circle.currentRound
+        circle.currentRound,
       );
 
     const amountCollected =
       await this.transactionRepository.getRoundTotalContributed(
         circleId,
-        circle.currentRound
+        circle.currentRound,
       );
 
     const contributionAmount = parseFloat(
-      circle.contributionSettings.amount || "0"
+      circle.contributionSettings.amount || "0",
     );
     const targetAmount = activeMembers.length * contributionAmount;
 
@@ -759,7 +800,7 @@ export class CircleService {
       circle.startDate,
       circle.currentRound,
       circle.contributionSettings.frequency,
-      circle.contributionSettings.gracePeriodDays
+      circle.contributionSettings.gracePeriodDays,
     );
 
     const percentage =
@@ -799,7 +840,7 @@ export class CircleService {
 
     const activeMembers = circle.members.filter((m) => m.status === "ACTIVE");
     const contributionAmount = parseFloat(
-      circle.contributionSettings.amount || "0"
+      circle.contributionSettings.amount || "0",
     );
     const payoutAmount = (activeMembers.length * contributionAmount).toString();
 
@@ -816,7 +857,7 @@ export class CircleService {
   }
 
   private async getMemberDetails(
-    members: any[]
+    members: any[],
   ): Promise<CircleMemberResponseDto[]> {
     const details: CircleMemberResponseDto[] = [];
 
@@ -847,7 +888,7 @@ export class CircleService {
         circleId: new Types.ObjectId(circleId),
         status: TransactionStatus.CONFIRMED,
       } as any,
-      { sort: { createdAt: -1 } }
+      { sort: { createdAt: -1 } },
     );
 
     const activities: ActivityLogDto[] = [];
@@ -861,7 +902,7 @@ export class CircleService {
         amount: tx.amount,
         message: this.formatActivityMessage(
           tx.type,
-          user?.firstName || "Member"
+          user?.firstName || "Member",
         ),
         timestamp: tx.createdAt,
       });
@@ -885,13 +926,13 @@ export class CircleService {
     startDate: Date,
     currentRound: number,
     frequency: PayoutFrequency,
-    gracePeriodDays: number
+    gracePeriodDays: number,
   ): number {
     const deadline = this.calculateContributionDeadline(
       startDate,
       currentRound,
       frequency,
-      gracePeriodDays
+      gracePeriodDays,
     );
     const now = new Date();
     const diffMs = deadline.getTime() - now.getTime();
@@ -918,7 +959,7 @@ export class CircleService {
 
   private calculateNextPayoutDate(
     startDate: Date,
-    frequency: PayoutFrequency
+    frequency: PayoutFrequency,
   ): Date {
     const date = new Date(startDate);
 
@@ -942,7 +983,7 @@ export class CircleService {
     startDate: Date,
     currentRound: number,
     frequency: PayoutFrequency,
-    gracePeriodDays: number
+    gracePeriodDays: number,
   ): Date {
     const payoutDate = new Date(startDate);
 
@@ -974,7 +1015,7 @@ export class CircleService {
 
   async startCircle(
     circleId: string,
-    userId: string
+    userId: string,
   ): Promise<{
     circle: CircleDocument;
     payoutsScheduled: boolean;
@@ -987,20 +1028,20 @@ export class CircleService {
 
     if (circle.status !== CircleStatus.RECRUITING) {
       throw new BadRequestException(
-        `Circle must be in RECRUITING status to start. Current status: ${circle.status}`
+        `Circle must be in RECRUITING status to start. Current status: ${circle.status}`,
       );
     }
 
     const activeMembers = circle.members.filter((m) => m.status === "ACTIVE");
     if (activeMembers.length < 2) {
       throw new BadRequestException(
-        "Circle must have at least 2 active members to start"
+        "Circle must have at least 2 active members to start",
       );
     }
 
     if (!circle.contractAddress) {
       throw new BadRequestException(
-        "Circle contract not deployed. Please activate the circle first."
+        "Circle contract not deployed. Please activate the circle first.",
       );
     }
 
@@ -1016,7 +1057,7 @@ export class CircleService {
     }
 
     this.logger.log(
-      `Circle ${circleId} started with ${activeMembers.length} members`
+      `Circle ${circleId} started with ${activeMembers.length} members`,
     );
 
     this.eventEmitter.emit(CIRCLE_EVENTS.CIRCLE_ACTIVATED, {
@@ -1030,7 +1071,7 @@ export class CircleService {
     for (const member of activeMembers) {
       try {
         const memberUser = await this.userRepository.findById(
-          member.userId.toString()
+          member.userId.toString(),
         );
         if (memberUser) {
           await this.circleMailService.sendCircleStartedEmail(
@@ -1039,12 +1080,12 @@ export class CircleService {
             circle.name,
             activeMembers.length,
             circle.contributionSettings.amount,
-            circle.contributionSettings.currency
+            circle.contributionSettings.currency,
           );
         }
       } catch (error: any) {
         this.logger.warn(
-          `Failed to send circle started email to member ${member.userId}: ${error.message}`
+          `Failed to send circle started email to member ${member.userId}: ${error.message}`,
         );
       }
     }
@@ -1081,12 +1122,12 @@ export class CircleService {
     const payoutSchedule = await Promise.all(
       activeMembers.map(async (member, index) => {
         const user = await this.userRepository.findById(
-          member.userId.toString()
+          member.userId.toString(),
         );
         const estimatedDate = this.calculatePayoutDateForRound(
           circle.startDate,
           index + 1,
-          circle.contributionSettings.frequency
+          circle.contributionSettings.frequency,
         );
 
         return {
@@ -1100,7 +1141,7 @@ export class CircleService {
           payoutDate: member.payoutDate,
           transactionHash: member.payoutTransactionHash,
         };
-      })
+      }),
     );
 
     return {
@@ -1116,7 +1157,7 @@ export class CircleService {
   private calculatePayoutDateForRound(
     startDate: Date,
     round: number,
-    frequency: PayoutFrequency
+    frequency: PayoutFrequency,
   ): Date {
     const date = new Date(startDate);
 

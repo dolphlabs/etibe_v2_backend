@@ -3,7 +3,8 @@ import { Logger } from "@nestjs/common";
 import { Job } from "bullmq";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { CircleRepository } from "../repositories/circle.repository";
-import { TransactionRepository } from "../repositories/transaction.repository";
+import { TransactionRepository } from "../../transactions/repositories/transaction.repository";
+import { NotificationService } from "../../notifications/services/notification.service";
 import { UserRepository } from "../../users/repositories/user.repository";
 import { NearAccountService } from "../../blockchain/services/near-account.service";
 import {
@@ -11,7 +12,8 @@ import {
   EncryptedData,
 } from "../../blockchain/services/vault.service";
 import { CircleDocument } from "../schemas/circle.schema";
-import { TransactionDocument } from "../schemas/transaction.schema";
+import { TransactionDocument } from "../../transactions/schemas/transaction.schema";
+import { NotificationType } from "../../../shared/enums";
 import {
   CircleStatus,
   Currency,
@@ -43,7 +45,8 @@ export class PayoutProcessor extends WorkerHost {
     private readonly userRepository: UserRepository,
     private readonly nearAccountService: NearAccountService,
     private readonly vaultService: VaultService,
-    private readonly eventEmitter: EventEmitter2
+    private readonly notificationService: NotificationService,
+    private readonly eventEmitter: EventEmitter2,
   ) {
     super();
   }
@@ -53,26 +56,26 @@ export class PayoutProcessor extends WorkerHost {
     const startTime = Date.now();
 
     this.logger.log(
-      `[PAYOUT_START] Processing payout job ${job.id} - Circle: ${data.circleId}, Round: ${data.roundNumber}, Recipient: ${data.recipientNearAccountId}, Amount: ${data.payoutAmount} ${data.currency}`
+      `[PAYOUT_START] Processing payout job ${job.id} - Circle: ${data.circleId}, Round: ${data.roundNumber}, Recipient: ${data.recipientNearAccountId}, Amount: ${data.payoutAmount} ${data.currency}`,
     );
 
     try {
       const verificationResult = await this.verifyPayoutEligibility(data);
       if (!verificationResult.eligible) {
         throw new Error(
-          `Payout verification failed: ${verificationResult.reason}`
+          `Payout verification failed: ${verificationResult.reason}`,
         );
       }
 
       const txResult = await this.executePayout(
         data,
-        verificationResult.circle!
+        verificationResult.circle!,
       );
 
       await this.handlePayoutSuccess(
         data,
         txResult.txHash,
-        verificationResult.circle!
+        verificationResult.circle!,
       );
 
       const result: PayoutResult = {
@@ -88,7 +91,7 @@ export class PayoutProcessor extends WorkerHost {
 
       const duration = Date.now() - startTime;
       this.logger.log(
-        `[PAYOUT_SUCCESS] Job ${job.id} completed in ${duration}ms - txHash: ${txResult.txHash}`
+        `[PAYOUT_SUCCESS] Job ${job.id} completed in ${duration}ms - txHash: ${txResult.txHash}`,
       );
 
       this.eventEmitter.emit(CIRCLE_EVENTS.PAYOUT_COMPLETED, result);
@@ -97,7 +100,7 @@ export class PayoutProcessor extends WorkerHost {
     } catch (error: any) {
       const duration = Date.now() - startTime;
       this.logger.error(
-        `[PAYOUT_ERROR] Job ${job.id} failed after ${duration}ms - Error: ${error.message}`
+        `[PAYOUT_ERROR] Job ${job.id} failed after ${duration}ms - Error: ${error.message}`,
       );
 
       throw error;
@@ -139,7 +142,7 @@ export class PayoutProcessor extends WorkerHost {
 
     const recipientMember = circle.members.find(
       (m) =>
-        m.userId.toString() === data.recipientUserId && m.status === "ACTIVE"
+        m.userId.toString() === data.recipientUserId && m.status === "ACTIVE",
     );
     if (!recipientMember) {
       return {
@@ -156,7 +159,7 @@ export class PayoutProcessor extends WorkerHost {
     }
 
     const recipientUser = await this.userRepository.findById(
-      data.recipientUserId
+      data.recipientUserId,
     );
     if (!recipientUser?.nearAccountId) {
       return {
@@ -168,7 +171,7 @@ export class PayoutProcessor extends WorkerHost {
     const hasBalance = await this.verifyContractBalance(
       circle.contractAddress,
       data.payoutAmount,
-      data.currency
+      data.currency,
     );
     if (!hasBalance) {
       return {
@@ -187,13 +190,12 @@ export class PayoutProcessor extends WorkerHost {
   private async verifyContractBalance(
     contractAddress: string,
     requiredAmount: string,
-    currency: string
+    currency: string,
   ): Promise<boolean> {
     try {
       if (currency === Currency.NEAR) {
-        const balance = await this.nearAccountService.getAccountBalance(
-          contractAddress
-        );
+        const balance =
+          await this.nearAccountService.getAccountBalance(contractAddress);
         const available = parseFloat(balance.available || "0");
         const required = parseFloat(requiredAmount);
 
@@ -201,7 +203,7 @@ export class PayoutProcessor extends WorkerHost {
       } else {
         const tokenBalance = await this.nearAccountService.getTokenBalance(
           contractAddress,
-          currency
+          currency,
         );
         const available = parseFloat(tokenBalance);
         const required = parseFloat(requiredAmount);
@@ -216,10 +218,10 @@ export class PayoutProcessor extends WorkerHost {
 
   private async executePayout(
     data: PayoutJobData,
-    circle: CircleDocument
+    circle: CircleDocument,
   ): Promise<{ txHash: string }> {
     this.logger.log(
-      `[PAYOUT_EXECUTE] Sending ${data.payoutAmount} ${data.currency} from ${data.contractAddress} to ${data.recipientNearAccountId}`
+      `[PAYOUT_EXECUTE] Sending ${data.payoutAmount} ${data.currency} from ${data.contractAddress} to ${data.recipientNearAccountId}`,
     );
 
     // For circle contract payouts, we need to call the circle contract's payout method
@@ -250,7 +252,7 @@ export class PayoutProcessor extends WorkerHost {
         txHash = await this.executeNearPayout(
           data.contractAddress,
           data.recipientNearAccountId,
-          data.payoutAmount
+          data.payoutAmount,
         );
       } else {
         // For token transfers (USDT, USDC)
@@ -258,12 +260,12 @@ export class PayoutProcessor extends WorkerHost {
           data.contractAddress,
           data.recipientNearAccountId,
           data.payoutAmount,
-          data.currency
+          data.currency,
         );
       }
       await this.transactionRepository.confirmTransaction(
         pendingTransaction._id.toString(),
-        txHash
+        txHash,
       );
 
       return { txHash };
@@ -276,14 +278,14 @@ export class PayoutProcessor extends WorkerHost {
   private async executeNearPayout(
     contractAddress: string,
     recipientId: string,
-    amount: string
+    amount: string,
   ): Promise<string> {
     // In production, this would call the circle contract's payout method
     // For now, we'll use the master account to fund the recipient
     try {
       const result = await this.nearAccountService.fundAccount(
         recipientId,
-        amount
+        amount,
       );
       return result?.transaction_outcome?.id || `payout-${Date.now()}`;
     } catch (error: any) {
@@ -296,7 +298,7 @@ export class PayoutProcessor extends WorkerHost {
     contractAddress: string,
     recipientId: string,
     amount: string,
-    currency: string
+    currency: string,
   ): Promise<string> {
     // In production, this would call ft_transfer from the circle contract
     // For now, we'll simulate the transaction
@@ -306,7 +308,7 @@ export class PayoutProcessor extends WorkerHost {
       const txHash = `token-payout-${Date.now()}-${currency}`;
 
       this.logger.log(
-        `Token payout simulated: ${amount} ${currency} to ${recipientId}, txHash: ${txHash}`
+        `Token payout simulated: ${amount} ${currency} to ${recipientId}, txHash: ${txHash}`,
       );
 
       return txHash;
@@ -319,12 +321,12 @@ export class PayoutProcessor extends WorkerHost {
   private async handlePayoutSuccess(
     data: PayoutJobData,
     txHash: string,
-    circle: CircleDocument
+    circle: CircleDocument,
   ): Promise<void> {
     await this.circleRepository.markPayoutReceived(
       data.circleId,
       data.recipientUserId,
-      txHash
+      txHash,
     );
 
     await this.circleRepository.advanceRound(data.circleId);
@@ -338,13 +340,26 @@ export class PayoutProcessor extends WorkerHost {
       if (!nextRecipient) {
         await this.circleRepository.updateStatus(
           data.circleId,
-          CircleStatus.COMPLETED
+          CircleStatus.COMPLETED,
         );
         this.logger.log(
-          `Circle ${data.circleId} completed - all payouts disbursed`
+          `Circle ${data.circleId} completed - all payouts disbursed`,
         );
       }
     }
+
+    await this.notificationService.createNotification({
+      userId: new Types.ObjectId(data.recipientUserId),
+      title: "Payout Received",
+      content: `Your payout of ${data.payoutAmount} ${data.currency} from ${circle.name} has been processed successfully.`,
+      type: NotificationType.PAYOUT_RECEIVED,
+      metadata: {
+        circleId: circle._id,
+        txHash,
+        amount: data.payoutAmount,
+        currency: data.currency,
+      },
+    });
 
     this.eventEmitter.emit(CIRCLE_EVENTS.ROUND_ADVANCED, {
       circleId: data.circleId,
@@ -362,7 +377,7 @@ export class PayoutProcessor extends WorkerHost {
   @OnWorkerEvent("completed")
   onCompleted(job: Job<PayoutJobData>, result: PayoutResult) {
     this.logger.log(
-      `Job ${job.id} completed successfully - txHash: ${result.txHash}`
+      `Job ${job.id} completed successfully - txHash: ${result.txHash}`,
     );
   }
 
@@ -374,7 +389,7 @@ export class PayoutProcessor extends WorkerHost {
     const maxAttempts = PAYOUT_RETRY_CONFIG.maxAttempts;
 
     this.logger.error(
-      `Job ${job.id} failed (attempt ${attemptsMade}/${maxAttempts}): ${error.message}`
+      `Job ${job.id} failed (attempt ${attemptsMade}/${maxAttempts}): ${error.message}`,
     );
 
     if (attemptsMade >= maxAttempts) {
@@ -389,7 +404,7 @@ export class PayoutProcessor extends WorkerHost {
 
   private async triggerPayoutFailureAlert(
     data: PayoutJobData,
-    error: Error
+    error: Error,
   ): Promise<void> {
     const alertPayload = {
       type: "PAYOUT_FAILURE",
@@ -407,7 +422,7 @@ export class PayoutProcessor extends WorkerHost {
     this.logger.error(
       `[CRITICAL_ALERT] Payout failed after ${
         PAYOUT_RETRY_CONFIG.maxAttempts
-      } retries: ${JSON.stringify(alertPayload)}`
+      } retries: ${JSON.stringify(alertPayload)}`,
     );
 
     // Emit failure event for notification service to send Slack/Discord alert
