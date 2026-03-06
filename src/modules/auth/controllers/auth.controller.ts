@@ -391,9 +391,15 @@ export class AuthController {
 
     const userAgent = request.headers["user-agent"] || "";
     const ip = request.ip || "";
-    return Buffer.from(`${userAgent}:${ip}`)
+    const generatedDeviceId = Buffer.from(`${userAgent}:${ip}`)
       .toString("base64")
       .substring(0, 32);
+
+    this.logger.debug(
+      `Generated deviceId: ${generatedDeviceId} from UA: ${userAgent}, IP: ${ip}`,
+    );
+
+    return generatedDeviceId;
   }
 
   private extractSessionMetadata(request: FastifyRequest): SessionMetadata {

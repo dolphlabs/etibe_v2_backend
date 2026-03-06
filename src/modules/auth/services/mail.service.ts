@@ -38,20 +38,20 @@ export class MailService {
 
   constructor(
     private readonly configService: ConfigService,
-    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {
     const apiKey = this.configService.get<string>("resend.apiKey");
 
     if (!apiKey) {
       this.logger.warn(
-        "Resend API key not configured. Emails will not be sent."
+        "Resend API key not configured. Emails will not be sent.",
       );
     }
 
     this.resend = new Resend(apiKey || "");
     this.fromEmail = this.configService.get<string>(
       "resend.fromEmail",
-      "noreply@etibe.app"
+      "noreply@etibe.app",
     );
     this.fromName = this.configService.get<string>("resend.fromName", "Etibé");
 
@@ -63,7 +63,7 @@ export class MailService {
       const templatePath = path.join(
         process.cwd(),
         "templates",
-        "verify-email.hbs"
+        "verify-email.hbs",
       );
 
       if (fs.existsSync(templatePath)) {
@@ -72,16 +72,16 @@ export class MailService {
         this.logger.log("Email templates loaded successfully");
       } else {
         this.verifyEmailTemplate = Handlebars.compile(
-          this.getDefaultVerifyEmailTemplate()
+          this.getDefaultVerifyEmailTemplate(),
         );
         this.logger.warn(
-          "Using default email template (template file not found)"
+          "Using default email template (template file not found)",
         );
       }
     } catch (error) {
       this.logger.error("Failed to load email templates", error);
       this.verifyEmailTemplate = Handlebars.compile(
-        this.getDefaultVerifyEmailTemplate()
+        this.getDefaultVerifyEmailTemplate(),
       );
     }
   }
@@ -90,7 +90,7 @@ export class MailService {
     email: string,
     otp: string,
     deviceId: string,
-    firstName: string
+    firstName: string,
   ): Promise<SendOtpResult> {
     const html = this.verifyEmailTemplate({
       firstName,
@@ -123,10 +123,11 @@ export class MailService {
   }
 
   async storeOtp(email: string, otp: string, deviceId: string): Promise<void> {
-    const key = `${OTP_PREFIX}${email.toLowerCase()}`;
+    const normalizedEmail = email.toLowerCase().trim();
+    const key = `${OTP_PREFIX}${normalizedEmail}`;
     const otpData: OtpData = {
-      otp,
-      email: email.toLowerCase(),
+      otp: otp.trim(),
+      email: normalizedEmail,
       deviceId,
       attempts: 0,
       createdAt: Date.now(),
@@ -134,18 +135,27 @@ export class MailService {
     };
 
     await this.cacheManager.set(key, otpData, OTP_EXPIRY_SECONDS * 1000);
+    this.logger.debug(`Stored OTP for ${normalizedEmail} with key ${key}`);
   }
 
   async verifyOtp(
     email: string,
     otp: string,
-    deviceId: string
+    deviceId: string,
   ): Promise<{ valid: boolean; error?: string }> {
-    const normalizedEmail = email.toLowerCase();
+    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedOtp = otp.trim();
     const attemptsKey = `${OTP_ATTEMPTS_PREFIX}${normalizedEmail}`;
 
+    this.logger.debug(
+      `Verifying OTP for ${normalizedEmail}. Input OTP: ${normalizedOtp}, DeviceId: ${deviceId}`,
+    );
+
     const attempts = await this.cacheManager.get<number>(attemptsKey);
+    this.logger.debug(`Current attempts for ${normalizedEmail}: ${attempts}`);
+
     if (attempts && attempts >= MAX_OTP_ATTEMPTS) {
+      this.logger.warn(`Too many failed attempts for ${normalizedEmail}`);
       return {
         valid: false,
         error:
@@ -157,17 +167,27 @@ export class MailService {
     const otpData = await this.cacheManager.get<OtpData>(key);
 
     if (!otpData) {
+      this.logger.warn(
+        `OTP not found in cache for ${normalizedEmail} (key: ${key})`,
+      );
       return { valid: false, error: "Verification code expired or not found" };
     }
 
+    this.logger.debug(
+      `Retrieved OTP data from cache: ${JSON.stringify(otpData)}`,
+    );
+
     if (Date.now() > otpData.expiresAt) {
+      this.logger.warn(
+        `OTP expired for ${normalizedEmail}. Current time: ${Date.now()}, Expires at: ${otpData.expiresAt}`,
+      );
       await this.cacheManager.del(key);
       return { valid: false, error: "Verification code has expired" };
     }
 
     if (otpData.deviceId !== deviceId) {
       this.logger.warn(
-        `Device mismatch for ${email}. Expected: ${otpData.deviceId}, Got: ${deviceId}`
+        `Device mismatch for ${normalizedEmail}. Expected: ${otpData.deviceId}, Got: ${deviceId}`,
       );
       return {
         valid: false,
@@ -175,12 +195,15 @@ export class MailService {
       };
     }
 
-    if (otpData.otp !== otp) {
-      const newAttempts = (attempts || 0) + 1;
+    if (otpData.otp !== normalizedOtp) {
+      this.logger.warn(
+        `OTP mismatch for ${normalizedEmail}. Expected: ${otpData.otp}, Got: ${normalizedOtp}`,
+      );
+      const newAttempts = (Number(attempts) || 0) + 1;
       await this.cacheManager.set(
         attemptsKey,
         newAttempts,
-        LOCKOUT_DURATION_SECONDS * 1000
+        LOCKOUT_DURATION_SECONDS * 1000,
       );
 
       const remainingAttempts = MAX_OTP_ATTEMPTS - newAttempts;
@@ -198,6 +221,7 @@ export class MailService {
       };
     }
 
+    this.logger.log(`OTP verified successfully for ${normalizedEmail}`);
     await this.cacheManager.del(key);
     await this.cacheManager.del(attemptsKey);
 
@@ -208,12 +232,13 @@ export class MailService {
     email: string,
     otp: string,
     deviceId: string,
-    firstName: string
+    firstName: string,
   ): Promise<SendOtpResult> {
-    const key = `${OTP_PREFIX}${email.toLowerCase()}`;
+    const normalizedEmail = email.toLowerCase().trim();
+    const key = `${OTP_PREFIX}${normalizedEmail}`;
     await this.cacheManager.del(key);
 
-    const attemptsKey = `${OTP_ATTEMPTS_PREFIX}${email.toLowerCase()}`;
+    const attemptsKey = `${OTP_ATTEMPTS_PREFIX}${normalizedEmail}`;
     await this.cacheManager.del(attemptsKey);
 
     return this.sendVerificationOtp(email, otp, deviceId, firstName);
@@ -315,14 +340,11 @@ export class MailService {
     `;
   }
 
-  /**
-   * Send password reset email with a secure reset link
-   */
   async sendResetPasswordEmail(
     email: string,
     resetToken: string,
     firstName: string,
-    resetUrl: string
+    resetUrl: string,
   ): Promise<SendOtpResult> {
     const html = this.getResetPasswordTemplate({
       firstName,
@@ -341,7 +363,7 @@ export class MailService {
       if (error) {
         this.logger.error(
           `Failed to send password reset email to ${email}`,
-          error
+          error,
         );
         return { success: false, error: error.message };
       }
@@ -351,16 +373,12 @@ export class MailService {
     } catch (error) {
       this.logger.error(
         `Error sending password reset email to ${email}`,
-        error
+        error,
       );
       return { success: false, error: (error as Error).message };
     }
   }
 
-  /**
-   * Get the reset password email template
-   * Uses Etibé branding with consistent design
-   */
   private getResetPasswordTemplate(data: {
     firstName: string;
     resetUrl: string;
@@ -413,9 +431,7 @@ export class MailService {
               <table role="presentation" style="width: 100%;">
                 <tr>
                   <td style="text-align: center;">
-                    <a href="${
-                      data.resetUrl
-                    }" style="display: inline-block; background-color: #4CAF50; color: #FFFFFF; text-decoration: none; font-weight: 600; font-size: 16px; padding: 16px 48px; border-radius: 8px; box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);">
+                    <a href="\${data.resetUrl}" style="display: inline-block; background-color: #4CAF50; color: #FFFFFF; text-decoration: none; font-weight: 600; font-size: 16px; padding: 16px 48px; border-radius: 8px; box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);">
                       Reset Password
                     </a>
                   </td>
@@ -479,13 +495,10 @@ export class MailService {
     `;
   }
 
-  /**
-   * Send welcome email after successful email verification
-   */
   async sendWelcomeEmail(
     email: string,
     firstName: string,
-    nearAccountId: string
+    nearAccountId: string,
   ): Promise<SendOtpResult> {
     const html = this.getWelcomeTemplate({
       firstName,
@@ -514,10 +527,6 @@ export class MailService {
     }
   }
 
-  /**
-   * Get the welcome email template
-   * Uses Etibé branding with consistent design
-   */
   private getWelcomeTemplate(data: {
     firstName: string;
     nearAccountId: string;
@@ -608,7 +617,7 @@ export class MailService {
                 Sent with ❤️ from Etibé
               </p>
               <p style="margin: 0 0 8px; font-size: 12px; color: #9E9E9E; text-align: center; line-height: 1.6;">
-                © ${data.year} Etibé. Built on NEAR Protocol.
+                © \${data.year} Etibé. Built on NEAR Protocol.
               </p>
               <p style="margin: 0; font-size: 11px; color: #BDBDBD; text-align: center; line-height: 1.6;">
                 Lagos, Nigeria
