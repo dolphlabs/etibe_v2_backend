@@ -10,6 +10,7 @@ import sha256 from "js-sha256";
 
 import { User, UserDocument } from "../../users/schemas/user.schema";
 import { NearAccountService } from "../../blockchain/services/near-account.service";
+import { BaseAccountService } from "../../blockchain/services/base-account.service";
 import {
   VaultService,
   EncryptedData,
@@ -23,10 +24,12 @@ import {
   WITHDRAWAL_RETRY_CONFIG,
   ASSET_DECIMALS,
 } from "../constants/withdrawal.constants";
+import { BaseTokenService } from "../../blockchain/services/base-token.service";
 import {
   TransactionType,
   TransactionStatus,
   Currency,
+  Chain,
 } from "../../../shared/enums/circle.enums";
 import { Transaction, TransactionDocument } from "@modules/transactions";
 
@@ -48,6 +51,8 @@ export class WithdrawalProcessor extends WorkerHost {
     @InjectModel(Transaction.name)
     private readonly transactionModel: Model<TransactionDocument>,
     private readonly nearAccountService: NearAccountService,
+    private readonly baseAccountService: BaseAccountService,
+    private readonly baseTokenService: BaseTokenService,
     private readonly vaultService: VaultService,
     private readonly tokenService: TokenService,
     private readonly eventEmitter: EventEmitter2,
@@ -87,8 +92,13 @@ export class WithdrawalProcessor extends WorkerHost {
 
     try {
       const user = await this.getUserWithPrivateKey(data.userId);
-      if (!user || !user.nearEncryptedPrivateKey) {
-        throw new Error("User wallet not found or not configured");
+      const chain = data.chain || Chain.NEAR;
+
+      if (chain === Chain.NEAR && (!user || !user.nearEncryptedPrivateKey)) {
+        throw new Error("User NEAR wallet not found or not configured");
+      }
+      if (chain === Chain.BASE && (!user || !user.baseEncryptedPrivateKey)) {
+        throw new Error("User Base wallet not found or not configured");
       }
 
       const transaction = await this.transactionModel.findById(
@@ -101,7 +111,7 @@ export class WithdrawalProcessor extends WorkerHost {
         throw new Error(`Transaction is already ${transaction.status}`);
       }
 
-      const txHash = await this.executeWithdrawal(user, data);
+      const txHash = await this.executeWithdrawal(user!, data);
 
       await this.transactionModel.findByIdAndUpdate(data.transactionId, {
         status: TransactionStatus.CONFIRMED,
@@ -150,12 +160,62 @@ export class WithdrawalProcessor extends WorkerHost {
   ): Promise<UserDocument | null> {
     return this.userModel
       .findById(userId)
-      .select("+nearEncryptedPrivateKey")
+      .select("+nearEncryptedPrivateKey +baseEncryptedPrivateKey")
       .lean()
       .exec() as Promise<UserDocument | null>;
   }
 
   private async executeWithdrawal(
+    user: UserDocument,
+    data: WithdrawalJobData,
+  ): Promise<string> {
+    const { asset, amount, destinationAddress, requiresStorageDeposit } = data;
+    const chain = data.chain || Chain.NEAR;
+
+    if (chain === Chain.BASE) {
+      return this.executeBaseWithdrawal(user, data);
+    }
+
+    return this.executeNearWithdrawal(user, data);
+  }
+
+  private async executeBaseWithdrawal(
+    user: UserDocument,
+    data: WithdrawalJobData,
+  ): Promise<string> {
+    const { asset, amount, destinationAddress } = data;
+
+    if (asset === "ETH") {
+      this.logger.log(
+        `Executing Base ETH transfer: ${amount} ETH to ${destinationAddress}`,
+      );
+      const result = await this.baseAccountService.executeEthTransfer(
+        user.baseEncryptedPrivateKey as EncryptedData,
+        destinationAddress,
+        amount,
+      );
+      return result.txHash;
+    } else {
+      const tokenAddress = this.baseTokenService.getTokenContractAddress(
+        asset as "CNGN" | "USDC",
+      );
+      const decimals = this.baseTokenService.getDecimals(asset);
+
+      this.logger.log(
+        `Executing Base ${asset} transfer: ${amount} to ${destinationAddress}`,
+      );
+      const result = await this.baseAccountService.executeErc20Transfer(
+        user.baseEncryptedPrivateKey as EncryptedData,
+        tokenAddress,
+        destinationAddress,
+        amount,
+        decimals,
+      );
+      return result.txHash;
+    }
+  }
+
+  private async executeNearWithdrawal(
     user: UserDocument,
     data: WithdrawalJobData,
   ): Promise<string> {
@@ -192,9 +252,10 @@ export class WithdrawalProcessor extends WorkerHost {
         `Executing NEAR transfer: ${amount} NEAR (${atomicAmount} yoctoNEAR) to ${destinationAddress}`,
       );
     } else {
-      const tokenContractId = this.tokenService.getTokenContractId(asset);
+      const nearAsset = asset as "USDT" | "USDC";
+      const tokenContractId = this.tokenService.getTokenContractId(nearAsset);
       receiverId = tokenContractId;
-      const atomicAmount = this.tokenService.toAtomicUnits(amount, asset);
+      const atomicAmount = this.tokenService.toAtomicUnits(amount, nearAsset);
 
       actions = this.tokenService.buildTokenTransferActions({
         tokenContractId,

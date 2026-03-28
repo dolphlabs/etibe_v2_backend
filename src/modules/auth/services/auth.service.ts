@@ -12,6 +12,7 @@ import { UserRepository } from "../../users/repositories";
 import { SessionService } from "./session.service";
 import { MailService } from "./mail.service";
 import { NearAccountService } from "../../blockchain/services/near-account.service";
+import { BaseAccountService } from "../../blockchain/services/base-account.service";
 import { VaultService } from "../../blockchain/services/vault.service";
 import { UserDocument } from "../../users/schemas";
 import {
@@ -43,6 +44,7 @@ export class AuthService {
     private readonly sessionService: SessionService,
     private readonly mailService: MailService,
     private readonly nearAccountService: NearAccountService,
+    private readonly baseAccountService: BaseAccountService,
     private readonly vaultService: VaultService,
     private readonly configService: ConfigService,
   ) {
@@ -119,7 +121,11 @@ export class AuthService {
     email: string,
     dto: VerifyEmailDto,
     deviceId: string,
-  ): Promise<{ user: AuthenticatedUser; nearAccountId: string }> {
+  ): Promise<{
+    user: AuthenticatedUser;
+    nearAccountId: string;
+    baseAddress?: string;
+  }> {
     const result = await this.mailService.verifyOtp(
       dto.email,
       dto.otp,
@@ -139,31 +145,54 @@ export class AuthService {
       throw new BadRequestException("User not found");
     }
 
-    const credentials = await this.nearAccountService.createSubAccount(
-      user.username,
-      "0.1",
-    );
+    // Create both NEAR and Base accounts in parallel
+    const [nearCredentials, baseCredentials] = await Promise.all([
+      this.nearAccountService.createSubAccount(user.username, "0.1"),
+      this.baseAccountService
+        .createAccount(user.username)
+        .catch((err: any) => {
+          this.logger.warn(
+            `Failed to create Base account for ${user.username}: ${err.message}`,
+          );
+          return null;
+        }),
+    ]);
 
-    const updatedUser = await this.userRepository.update(user._id.toString(), {
+    const updateData: Partial<UserDocument> = {
       isEmailVerified: true,
       isVerified: true,
-      nearAccountId: credentials.nearAccountId,
-      nearPublicKey: credentials.publicKey,
-      nearEncryptedPrivateKey: credentials.encryptedPrivateKey,
+      nearAccountId: nearCredentials.nearAccountId,
+      nearPublicKey: nearCredentials.publicKey,
+      nearEncryptedPrivateKey: nearCredentials.encryptedPrivateKey,
       onboardingCompleted: true,
-    } as Partial<UserDocument>);
+    };
+
+    if (baseCredentials) {
+      updateData.baseAddress = baseCredentials.baseAddress;
+      updateData.basePublicKey = baseCredentials.publicKey;
+      updateData.baseEncryptedPrivateKey = baseCredentials.encryptedPrivateKey;
+      updateData.preferredChain = "BASE";
+    }
+
+    const updatedUser = await this.userRepository.update(
+      user._id.toString(),
+      updateData as Partial<UserDocument>,
+    );
 
     if (!updatedUser) {
       throw new BadRequestException("Failed to complete verification");
     }
 
     this.logger.log(
-      `User ${user.email} verified. NEAR account: ${credentials.nearAccountId}`,
+      `User ${user.email} verified. NEAR: ${nearCredentials.nearAccountId}${
+        baseCredentials ? `, Base: ${baseCredentials.baseAddress}` : ""
+      }`,
     );
 
     return {
       user: this.mapUserToAuthenticatedUser(updatedUser, "", deviceId),
-      nearAccountId: credentials.nearAccountId,
+      nearAccountId: nearCredentials.nearAccountId,
+      baseAddress: baseCredentials?.baseAddress,
     };
   }
 
@@ -311,8 +340,11 @@ export class AuthService {
   async getOnboardingStatus(userId: string): Promise<{
     isEmailVerified: boolean;
     hasNearAccount: boolean;
+    hasBaseAccount: boolean;
     onboardingCompleted: boolean;
     nearAccountId?: string;
+    baseAddress?: string;
+    preferredChain?: string;
   }> {
     const user = await this.userRepository.findById(userId);
 
@@ -323,8 +355,11 @@ export class AuthService {
     return {
       isEmailVerified: user.isEmailVerified,
       hasNearAccount: !!user.nearAccountId,
+      hasBaseAccount: !!user.baseAddress,
       onboardingCompleted: user.onboardingCompleted,
       nearAccountId: user.nearAccountId,
+      baseAddress: user.baseAddress,
+      preferredChain: user.preferredChain,
     };
   }
 
@@ -376,6 +411,8 @@ export class AuthService {
       avatar: user.avatar,
       isVerified: user.isVerified,
       nearAccountId: user.nearAccountId,
+      baseAddress: user.baseAddress,
+      preferredChain: user.preferredChain,
       sessionId,
       deviceId,
     };

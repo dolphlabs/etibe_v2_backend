@@ -13,6 +13,8 @@ import { Cache } from "cache-manager";
 
 import { User, UserDocument } from "../../users/schemas/user.schema";
 import { NearAccountService } from "../../blockchain/services/near-account.service";
+import { BaseAccountService } from "../../blockchain/services/base-account.service";
+import { BaseTokenService } from "../../blockchain/services/base-token.service";
 import { TokenService } from "../../blockchain/services/token.service";
 import { VaultService } from "../../blockchain/services/vault.service";
 import { MailService } from "../../auth/services/mail.service";
@@ -27,11 +29,16 @@ import {
   WITHDRAWAL_OTP_EXPIRY_SECONDS,
   WITHDRAWAL_OTP_MAX_ATTEMPTS,
 } from "../constants/withdrawal.constants";
-import { WithdrawDto, WithdrawalAsset } from "../dto/withdraw.dto";
+import {
+  WithdrawDto,
+  WithdrawalAsset,
+  inferChainFromAsset,
+} from "../dto/withdraw.dto";
 import {
   TransactionType,
   TransactionStatus,
   Currency,
+  Chain,
 } from "../../../shared/enums/circle.enums";
 import { Transaction, TransactionDocument } from "@modules/transactions";
 
@@ -60,6 +67,8 @@ export class WalletService {
     @Inject(CACHE_MANAGER)
     private readonly cacheManager: Cache,
     private readonly nearAccountService: NearAccountService,
+    private readonly baseAccountService: BaseAccountService,
+    private readonly baseTokenService: BaseTokenService,
     private readonly tokenService: TokenService,
     private readonly vaultService: VaultService,
     private readonly mailService: MailService,
@@ -70,14 +79,20 @@ export class WalletService {
     deviceId: string,
     asset: WithdrawalAsset,
     amount: string,
+    chain?: Chain,
   ): Promise<{ success: boolean; message: string }> {
     const user = await this.userModel.findById(userId).lean();
     if (!user) {
       throw new BadRequestException("User not found");
     }
 
-    if (!user.nearAccountId) {
+    const resolvedChain = inferChainFromAsset(asset, chain);
+
+    if (resolvedChain === Chain.NEAR && !user.nearAccountId) {
       throw new BadRequestException("NEAR wallet not set up");
+    }
+    if (resolvedChain === Chain.BASE && !user.baseAddress) {
+      throw new BadRequestException("Base wallet not set up");
     }
 
     this.validateWithdrawalAmount(amount, asset);
@@ -155,25 +170,42 @@ export class WalletService {
       }
     }
 
+    const resolvedChain = inferChainFromAsset(
+      dto.asset as WithdrawalAsset,
+      dto.chain,
+    );
+
     const user = await this.userModel
       .findById(userId)
-      .select("+nearEncryptedPrivateKey")
+      .select("+nearEncryptedPrivateKey +baseEncryptedPrivateKey")
       .lean();
 
     if (!user) {
       throw new BadRequestException("User not found");
     }
 
-    if (!user.nearAccountId) {
-      throw new BadRequestException(
-        "NEAR wallet not set up. Please complete onboarding.",
-      );
-    }
-
-    if (!user.nearEncryptedPrivateKey) {
-      throw new BadRequestException(
-        "Wallet not configured for withdrawals. Please contact support.",
-      );
+    if (resolvedChain === Chain.NEAR) {
+      if (!user.nearAccountId) {
+        throw new BadRequestException(
+          "NEAR wallet not set up. Please complete onboarding.",
+        );
+      }
+      if (!user.nearEncryptedPrivateKey) {
+        throw new BadRequestException(
+          "Wallet not configured for withdrawals. Please contact support.",
+        );
+      }
+    } else {
+      if (!user.baseAddress) {
+        throw new BadRequestException(
+          "Base wallet not set up. Please complete onboarding.",
+        );
+      }
+      if (!user.baseEncryptedPrivateKey) {
+        throw new BadRequestException(
+          "Base wallet not configured for withdrawals. Please contact support.",
+        );
+      }
     }
 
     await this.verifyWithdrawalOtp(
@@ -184,18 +216,38 @@ export class WalletService {
       dto.amount,
     );
 
-    this.validateWithdrawalAmount(dto.amount, dto.asset);
+    this.validateWithdrawalAmount(dto.amount, dto.asset as WithdrawalAsset);
 
-    await this.checkAvailableBalance(user.nearAccountId, dto.asset, dto.amount);
+    let validation: { valid: boolean; error?: string; requiresStorageDeposit?: boolean };
 
-    const validation = await this.tokenService.validateWithdrawal(
-      dto.asset,
-      dto.destinationAddress,
-    );
+    if (resolvedChain === Chain.BASE) {
+      await this.checkAvailableBalanceBase(
+        user.baseAddress!,
+        dto.asset as WithdrawalAsset,
+        dto.amount,
+      );
+      validation = await this.baseTokenService.validateWithdrawal(
+        dto.asset,
+        dto.destinationAddress,
+      );
+    } else {
+      await this.checkAvailableBalance(
+        user.nearAccountId!,
+        dto.asset as WithdrawalAsset,
+        dto.amount,
+      );
+      validation = await this.tokenService.validateWithdrawal(
+        dto.asset as "NEAR" | "USDT" | "USDC",
+        dto.destinationAddress,
+      );
+    }
 
     if (!validation.valid) {
       throw new BadRequestException(validation.error);
     }
+
+    const sourceAddress =
+      resolvedChain === Chain.BASE ? user.baseAddress! : user.nearAccountId!;
 
     const transaction = await this.transactionModel.create({
       type: TransactionType.WITHDRAWAL,
@@ -203,23 +255,31 @@ export class WalletService {
       userId: new Types.ObjectId(userId),
       amount: dto.amount,
       currency: Currency[dto.asset as keyof typeof Currency],
-      nearAccountId: dto.destinationAddress,
+      chain: resolvedChain,
+      nearAccountId:
+        resolvedChain === Chain.NEAR ? dto.destinationAddress : undefined,
+      baseAddress:
+        resolvedChain === Chain.BASE ? dto.destinationAddress : undefined,
       metadata: {
         idempotencyKey,
-        sourceAddress: user.nearAccountId,
+        sourceAddress,
         destinationAddress: dto.destinationAddress,
         requiresStorageDeposit: validation.requiresStorageDeposit,
       },
     });
 
     this.logger.log(
-      `Created PENDING withdrawal transaction ${transaction._id} for user ${userId}`,
+      `Created PENDING withdrawal transaction ${transaction._id} for user ${userId} on ${resolvedChain}`,
     );
 
     const jobData: WithdrawalJobData = {
       transactionId: transaction._id.toString(),
       userId,
-      userNearAccountId: user.nearAccountId,
+      chain: resolvedChain,
+      userNearAccountId:
+        resolvedChain === Chain.NEAR ? user.nearAccountId : undefined,
+      userBaseAddress:
+        resolvedChain === Chain.BASE ? user.baseAddress : undefined,
       destinationAddress: dto.destinationAddress,
       amount: dto.amount,
       asset: dto.asset,
@@ -380,6 +440,45 @@ export class WalletService {
       if (availableNear < 0.01) {
         throw new BadRequestException(
           `Insufficient NEAR for transaction fees. Please deposit at least 0.01 NEAR.`,
+        );
+      }
+    }
+  }
+
+  private async checkAvailableBalanceBase(
+    baseAddress: string,
+    asset: WithdrawalAsset,
+    amount: string,
+  ): Promise<void> {
+    const numAmount = parseFloat(amount);
+
+    if (asset === "ETH") {
+      const balance = await this.baseAccountService.getBalance(baseAddress);
+      const availableBalance = parseFloat(balance);
+
+      if (availableBalance < numAmount + 0.0005) {
+        throw new BadRequestException(
+          `Insufficient ETH balance. Available: ${availableBalance.toFixed(6)} ETH`,
+        );
+      }
+    } else {
+      const tokenBalance = await this.baseAccountService.getTokenBalance(
+        baseAddress,
+        this.baseTokenService.getTokenContractAddress(asset as "CNGN" | "USDC"),
+      );
+      const availableBalance = parseFloat(tokenBalance);
+
+      if (availableBalance < numAmount) {
+        throw new BadRequestException(
+          `Insufficient ${asset} balance. Available: ${availableBalance.toFixed(2)} ${asset}`,
+        );
+      }
+
+      // Check ETH for gas
+      const ethBalance = await this.baseAccountService.getBalance(baseAddress);
+      if (parseFloat(ethBalance) < 0.0005) {
+        throw new BadRequestException(
+          "Insufficient ETH for transaction fees. Please deposit some ETH for gas.",
         );
       }
     }
