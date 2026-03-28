@@ -7,31 +7,46 @@ import {
   IsOptional,
   Min,
   IsNumber,
+  ValidateIf,
 } from "class-validator";
 import { Transform } from "class-transformer";
-import { Currency } from "../../../shared/enums/circle.enums";
+import { Chain, Currency } from "../../../shared/enums/circle.enums";
 
 export enum WithdrawalAsset {
   NEAR = "NEAR",
+  ETH = "ETH",
   USDT = "USDT",
   USDC = "USDC",
+  CNGN = "CNGN",
 }
 
 /**
  * NEAR address validation pattern.
- *
- * Valid NEAR addresses can be:
- * - Named accounts: alice.near, bob.testnet, sub.account.near
- * - Implicit accounts: 64-character hex strings
- *
- * Rules for named accounts:
- * - Minimum 2 characters, maximum 64 characters
- * - Only lowercase alphanumeric characters, hyphens, underscores, and dots
- * - Cannot start or end with a dot, hyphen, or underscore
- * - Cannot have consecutive dots
  */
 export const NEAR_ADDRESS_PATTERN =
   /^(?:[a-z\d]+[-_])*[a-z\d]+(?:\.[a-z\d]+[-_]*)*(?:\.[a-z\d]+)+$|^[a-f0-9]{64}$/;
+
+/**
+ * Ethereum/Base address validation pattern.
+ */
+export const ETH_ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
+
+/**
+ * Infer chain from asset.
+ * ETH/CNGN => BASE, NEAR => NEAR, USDT => NEAR, USDC => ambiguous (needs explicit chain)
+ */
+export function inferChainFromAsset(
+  asset: WithdrawalAsset,
+  chain?: Chain,
+): Chain {
+  if (chain) return chain;
+  if (asset === WithdrawalAsset.ETH || asset === WithdrawalAsset.CNGN)
+    return Chain.BASE;
+  if (asset === WithdrawalAsset.NEAR || asset === WithdrawalAsset.USDT)
+    return Chain.NEAR;
+  // USDC is on both chains — default to BASE
+  return Chain.BASE;
+}
 
 export class WithdrawDto {
   @IsString({ message: "Amount must be a string" })
@@ -42,18 +57,20 @@ export class WithdrawDto {
   amount!: string;
 
   @IsEnum(WithdrawalAsset, {
-    message: "Asset must be one of: NEAR, USDT, USDC",
+    message: `Asset must be one of: ${Object.values(WithdrawalAsset).join(", ")}`,
   })
   @IsNotEmpty({ message: "Asset is required" })
   asset!: WithdrawalAsset;
 
+  @IsOptional()
+  @IsEnum(Chain, {
+    message: `Chain must be one of: ${Object.values(Chain).join(", ")}`,
+  })
+  chain?: Chain;
+
   @IsString({ message: "Destination address must be a string" })
   @IsNotEmpty({ message: "Destination address is required" })
-  @Matches(NEAR_ADDRESS_PATTERN, {
-    message:
-      "Invalid NEAR address format. Must be a valid named account (e.g., alice.near) or implicit account (64-character hex)",
-  })
-  @Transform(({ value }) => value?.toLowerCase().trim())
+  @Transform(({ value }) => value?.trim())
   destinationAddress!: string;
 
   @IsString({ message: "OTP must be a string" })
@@ -71,7 +88,7 @@ export class WithdrawResponseDto {
 
 export class RequestWithdrawalOtpDto {
   @IsEnum(WithdrawalAsset, {
-    message: "Asset must be one of: NEAR, USDT, USDC",
+    message: `Asset must be one of: ${Object.values(WithdrawalAsset).join(", ")}`,
   })
   @IsNotEmpty({ message: "Asset is required" })
   asset!: WithdrawalAsset;
@@ -82,6 +99,12 @@ export class RequestWithdrawalOtpDto {
     message: "Amount must be a valid positive number string",
   })
   amount!: string;
+
+  @IsOptional()
+  @IsEnum(Chain, {
+    message: `Chain must be one of: ${Object.values(Chain).join(", ")}`,
+  })
+  chain?: Chain;
 }
 
 export class WithdrawalHistoryQueryDto {
