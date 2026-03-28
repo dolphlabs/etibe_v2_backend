@@ -4,11 +4,30 @@ import {
   VaultService,
   NearAccountService,
   TokenService,
+  BaseService,
+  BaseAccountService,
+  BaseTokenService,
 } from "./services";
 
 @Global()
 @Module({
-  providers: [NearService, VaultService, NearAccountService, TokenService],
-  exports: [NearService, VaultService, NearAccountService, TokenService],
+  providers: [
+    NearService,
+    VaultService,
+    NearAccountService,
+    TokenService,
+    BaseService,
+    BaseAccountService,
+    BaseTokenService,
+  ],
+  exports: [
+    NearService,
+    VaultService,
+    NearAccountService,
+    TokenService,
+    BaseService,
+    BaseAccountService,
+    BaseTokenService,
+  ],
 })
 export class BlockchainModule {}
