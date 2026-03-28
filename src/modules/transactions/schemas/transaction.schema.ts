@@ -15,9 +15,11 @@ export interface TransactionDocument extends Document {
   circleId?: Types.ObjectId;
   amount: string;
   currency: Currency;
+  chain?: string;
   round?: number;
   transactionHash?: string;
   nearAccountId?: string;
+  baseAddress?: string;
   metadata?: Record<string, unknown>;
   failureReason?: string;
   confirmedAt?: Date;
@@ -103,9 +105,19 @@ export class Transaction {
   transactionHash?: string;
 
   @Prop({
+    enum: ["BASE", "NEAR"],
+  })
+  chain?: string;
+
+  @Prop({
     trim: true,
   })
   nearAccountId?: string;
+
+  @Prop({
+    trim: true,
+  })
+  baseAddress?: string;
 
   @Prop({
     type: MongooseSchema.Types.Mixed,

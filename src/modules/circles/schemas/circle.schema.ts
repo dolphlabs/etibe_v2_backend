@@ -2,6 +2,7 @@ import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
 import { Document, Types, Schema as MongooseSchema } from "mongoose";
 import { COLLECTION_NAMES } from "../../../shared/constants";
 import {
+  Chain,
   Currency,
   CircleStatus,
   PayoutFrequency,
@@ -99,6 +100,7 @@ export interface CircleDocument extends Document {
   description?: string;
   logoUrl?: string;
   creatorId: Types.ObjectId;
+  chain: Chain;
   contributionSettings: ContributionSettings;
   maxMembers: number;
   currentRound: number;
@@ -163,6 +165,14 @@ export class Circle {
     index: true,
   })
   creatorId!: Types.ObjectId;
+
+  @Prop({
+    required: true,
+    enum: Chain,
+    default: Chain.BASE,
+    index: true,
+  })
+  chain!: Chain;
 
   @Prop({
     required: true,

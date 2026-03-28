@@ -25,10 +25,16 @@ export class WalletBalance {
   NEAR!: string;
 
   @Prop({ default: "0" })
+  ETH!: string;
+
+  @Prop({ default: "0" })
   USDT!: string;
 
   @Prop({ default: "0" })
   USDC!: string;
+
+  @Prop({ default: "0" })
+  CNGN!: string;
 
   @Prop()
   lastUpdatedAt?: Date;
@@ -48,6 +54,10 @@ export interface UserDocument extends Document {
   nearAccountId?: string;
   nearPublicKey?: string;
   nearEncryptedPrivateKey?: EncryptedKey;
+  baseAddress?: string;
+  basePublicKey?: string;
+  baseEncryptedPrivateKey?: EncryptedKey;
+  preferredChain?: string;
   walletBalance?: WalletBalance;
   isActive: boolean;
   isVerified: boolean;
@@ -71,6 +81,7 @@ export interface UserDocument extends Document {
     transform: (_doc, ret: Record<string, unknown>) => {
       delete ret.password;
       delete ret.nearEncryptedPrivateKey;
+      delete ret.baseEncryptedPrivateKey;
       delete ret.__v;
       return ret;
     },
@@ -154,9 +165,34 @@ export class User {
   })
   nearEncryptedPrivateKey?: EncryptedKey;
 
+  // Base Chain Wallet Fields
+  @Prop({
+    trim: true,
+    sparse: true,
+    unique: true,
+  })
+  baseAddress?: string;
+
+  @Prop({
+    trim: true,
+  })
+  basePublicKey?: string;
+
+  @Prop({
+    type: EncryptedKeySchema,
+    select: false,
+  })
+  baseEncryptedPrivateKey?: EncryptedKey;
+
+  @Prop({
+    enum: ["BASE", "NEAR"],
+    default: "BASE",
+  })
+  preferredChain?: string;
+
   @Prop({
     type: WalletBalanceSchema,
-    default: () => ({ NEAR: "0", USDT: "0", USDC: "0" }),
+    default: () => ({ NEAR: "0", ETH: "0", USDT: "0", USDC: "0", CNGN: "0" }),
   })
   walletBalance?: WalletBalance;
 

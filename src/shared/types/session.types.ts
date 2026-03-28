@@ -47,6 +47,8 @@ export interface AuthenticatedUser {
   avatar?: string;
   isVerified: boolean;
   nearAccountId?: string;
+  baseAddress?: string;
+  preferredChain?: string;
   sessionId: string;
   deviceId: string;
 }
