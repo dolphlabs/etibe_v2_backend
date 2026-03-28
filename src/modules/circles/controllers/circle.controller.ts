@@ -274,6 +274,7 @@ export class CircleController {
       name: circle.name,
       description: circle.description,
       logoUrl: circle.logoUrl,
+      chain: circle.chain || "NEAR",
       status: circle.status,
       contractAddress: circle.contractAddress,
       contributionSettings: {

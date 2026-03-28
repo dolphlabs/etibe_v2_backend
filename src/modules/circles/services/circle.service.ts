@@ -16,6 +16,7 @@ import { CircleRepository } from "../repositories/circle.repository";
 import { TransactionRepository } from "../../transactions/repositories/transaction.repository";
 import { NearService } from "../../blockchain/services/near.service";
 import { NearAccountService } from "../../blockchain/services/near-account.service";
+import { BaseAccountService } from "../../blockchain/services/base-account.service";
 import { CircleDocument } from "../schemas";
 import { TransactionDocument } from "../../transactions/schemas/transaction.schema";
 import {
@@ -33,11 +34,16 @@ import {
   TransactionStatus,
   PayoutFrequency,
   ContributionProgress,
+  Chain,
+  CHAIN_CURRENCIES,
+  Currency,
+  DEFAULT_CHAIN,
 } from "../../../shared/enums/circle.enums";
 import {
   CACHE_KEYS,
   CACHE_TTL,
   APP_CONSTANTS,
+  BASE_TOKEN_CONTRACTS,
 } from "../../../shared/constants";
 import { UserRepository } from "../../users/repositories";
 import { CircleMailService } from "./circle-mail.service";
@@ -55,6 +61,7 @@ export class CircleService {
     private readonly userRepository: UserRepository,
     private readonly nearService: NearService,
     private readonly nearAccountService: NearAccountService,
+    private readonly baseAccountService: BaseAccountService,
     private readonly circleMailService: CircleMailService,
     private readonly notificationService: NotificationService,
     private readonly eventEmitter: EventEmitter2,
@@ -66,10 +73,33 @@ export class CircleService {
     dto: CreateCircleDto,
   ): Promise<CircleDocument> {
     const creator = await this.userRepository.findById(creatorId);
+    if (!creator) {
+      throw new BadRequestException("User not found");
+    }
 
-    if (!creator?.nearAccountId) {
+    const chain = dto.chain || DEFAULT_CHAIN;
+
+    // Validate creator has an account on the chosen chain
+    if (chain === Chain.NEAR && !creator.nearAccountId) {
       throw new BadRequestException(
-        "You need a verified NEAR account to create a circle",
+        "You need a verified NEAR account to create a circle on NEAR",
+      );
+    }
+    if (chain === Chain.BASE && !creator.baseAddress) {
+      throw new BadRequestException(
+        "You need a verified Base account to create a circle on Base",
+      );
+    }
+
+    // Validate currency is compatible with the chosen chain
+    const allowedCurrencies = CHAIN_CURRENCIES[chain];
+    if (
+      !allowedCurrencies.includes(
+        dto.contributionSettings.currency as Currency,
+      )
+    ) {
+      throw new BadRequestException(
+        `Currency ${dto.contributionSettings.currency} is not supported on ${chain}. Allowed: ${allowedCurrencies.join(", ")}`,
       );
     }
 
@@ -86,6 +116,7 @@ export class CircleService {
       name: dto.name,
       description: dto.description,
       logoUrl: dto.logoUrl,
+      chain,
       creatorId: new Types.ObjectId(creatorId),
       contributionSettings: {
         amount: dto.contributionSettings.amount,
@@ -152,25 +183,60 @@ export class CircleService {
     }
 
     const creator = await this.userRepository.findById(userId);
-    if (!creator?.nearAccountId) {
+    const chain = circle.chain || Chain.NEAR;
+
+    if (!creator) {
+      throw new BadRequestException("Creator not found");
+    }
+    if (chain === Chain.NEAR && !creator.nearAccountId) {
       throw new BadRequestException(
         "Creator must have a NEAR account to activate the circle",
       );
     }
+    if (chain === Chain.BASE && !creator.baseAddress) {
+      throw new BadRequestException(
+        "Creator must have a Base account to activate the circle",
+      );
+    }
 
-    this.logger.log(`Deploying circle contract for: ${circle.name}`);
+    this.logger.log(
+      `Deploying circle contract on ${chain} for: ${circle.name}`,
+    );
 
-    const { contractAddress, txHash } =
-      await this.nearAccountService.deployCircleContract(
+    let contractAddress: string;
+    let txHash: string;
+
+    if (chain === Chain.BASE) {
+      // Resolve currency to token address (address(0) = ETH mode)
+      const tokenAddress = this.resolveBaseTokenAddress(
+        circle.contributionSettings.currency,
+      );
+
+      const result = await this.baseAccountService.deployCircleContract(
         circleId,
         circle.name,
-        creator.nearAccountId,
+        creator!.baseAddress!,
+        tokenAddress,
+        circle.contributionSettings.amount,
+        circle.maxMembers,
+        circle.contributionSettings.gracePeriodDays,
+      );
+      contractAddress = result.contractAddress;
+      txHash = result.txHash;
+    } else {
+      const result = await this.nearAccountService.deployCircleContract(
+        circleId,
+        circle.name,
+        creator!.nearAccountId!,
         circle.contributionSettings.amount,
         circle.contributionSettings.currency,
         circle.contributionSettings.frequency,
         circle.maxMembers,
         circle.contributionSettings.gracePeriodDays,
       );
+      contractAddress = result.contractAddress;
+      txHash = result.txHash;
+    }
 
     // Update circle with contract address and activate
     const updated = await this.circleRepository.update(circleId, {
@@ -340,6 +406,7 @@ export class CircleService {
         name: circle.name,
         description: circle.description,
         logoUrl: circle.logoUrl,
+        chain: circle.chain || Chain.NEAR,
         status: circle.status,
         contractAddress: circle.contractAddress,
         contributionSettings: {
@@ -511,18 +578,30 @@ export class CircleService {
       throw new BadRequestException("Circle is not accepting contributions");
     }
 
+    const chain = circle.chain || Chain.NEAR;
+
     const user = await this.userRepository.findById(userId, {
-      select: ["+nearEncryptedPrivateKey"],
+      select: ["+nearEncryptedPrivateKey", "+baseEncryptedPrivateKey"],
     });
 
-    if (!user?.nearAccountId) {
-      throw new BadRequestException("You need a NEAR wallet to contribute");
-    }
-
-    if (!user.nearEncryptedPrivateKey) {
-      throw new BadRequestException(
-        "Your wallet is not set up for automatic contributions. Please contact support.",
-      );
+    if (chain === Chain.NEAR) {
+      if (!user?.nearAccountId) {
+        throw new BadRequestException("You need a NEAR wallet to contribute");
+      }
+      if (!user.nearEncryptedPrivateKey) {
+        throw new BadRequestException(
+          "Your wallet is not set up for automatic contributions. Please contact support.",
+        );
+      }
+    } else {
+      if (!user?.baseAddress) {
+        throw new BadRequestException("You need a Base wallet to contribute");
+      }
+      if (!user.baseEncryptedPrivateKey) {
+        throw new BadRequestException(
+          "Your Base wallet is not set up for automatic contributions. Please contact support.",
+        );
+      }
     }
 
     const isMember = circle.members.some(
@@ -551,38 +630,55 @@ export class CircleService {
       );
     }
 
-    if (currency === "USDT" || currency === "USDC") {
-      try {
-        const isRegistered =
-          await this.nearAccountService.ensureTokenRegistration(
-            user.nearAccountId,
-            currency as "USDT" | "USDC",
-          );
+    let txHash: string;
 
-        if (!isRegistered) {
+    if (chain === Chain.BASE) {
+      this.logger.log(
+        `Executing Base contribution: ${amount} ${currency} from ${user!.baseAddress} for circle ${circle.name}`,
+      );
+
+      const result = await this.baseAccountService.executeContribution(
+        user!.baseEncryptedPrivateKey!,
+        circle.contractAddress,
+        amount,
+        currency,
+      );
+      txHash = result.txHash;
+    } else {
+      // NEAR chain logic
+      if (currency === "USDT" || currency === "USDC") {
+        try {
+          const isRegistered =
+            await this.nearAccountService.ensureTokenRegistration(
+              user!.nearAccountId!,
+              currency as "USDT" | "USDC",
+            );
+
+          if (!isRegistered) {
+            this.logger.warn(
+              `Failed to register ${user!.nearAccountId} with ${currency} contract, proceeding anyway...`,
+            );
+          }
+        } catch (error: any) {
           this.logger.warn(
-            `Failed to register ${user.nearAccountId} with ${currency} contract, proceeding anyway...`,
+            `Token registration check failed for ${user!.nearAccountId}: ${error.message}`,
           );
         }
-      } catch (error: any) {
-        this.logger.warn(
-          `Token registration check failed for ${user.nearAccountId}: ${error.message}`,
-        );
-        // Don't throw - the contribution might still work if already registered
       }
+
+      this.logger.log(
+        `Executing NEAR contribution: ${amount} ${currency} from ${user!.nearAccountId} for circle ${circle.name}`,
+      );
+
+      const result = await this.nearAccountService.executeContribution(
+        user!.nearAccountId!,
+        user!.nearEncryptedPrivateKey!,
+        circle.contractAddress,
+        amount,
+        currency,
+      );
+      txHash = result.txHash;
     }
-
-    this.logger.log(
-      `Executing contribution: ${amount} ${currency} from ${user.nearAccountId} for circle ${circle.name}`,
-    );
-
-    const { txHash } = await this.nearAccountService.executeContribution(
-      user.nearAccountId,
-      user.nearEncryptedPrivateKey,
-      circle.contractAddress,
-      amount,
-      currency,
-    );
 
     const transaction = await this.transactionRepository.create({
       type: TransactionType.CONTRIBUTION,
@@ -591,9 +687,11 @@ export class CircleService {
       circleId: new Types.ObjectId(circleId),
       amount,
       currency,
+      chain,
       round: circle.currentRound,
       transactionHash: txHash,
-      nearAccountId: user.nearAccountId,
+      nearAccountId: chain === Chain.NEAR ? user!.nearAccountId : undefined,
+      baseAddress: chain === Chain.BASE ? user!.baseAddress : undefined,
       confirmedAt: new Date(),
     } as Partial<TransactionDocument>);
 
@@ -1003,6 +1101,15 @@ export class CircleService {
     payoutDate.setDate(payoutDate.getDate() - gracePeriodDays);
 
     return payoutDate;
+  }
+
+  private resolveBaseTokenAddress(currency: string): string {
+    const network =
+      process.env.BASE_NETWORK === "mainnet" ? "mainnet" : "sepolia";
+    if (currency === "CNGN") return BASE_TOKEN_CONTRACTS[network].CNGN;
+    if (currency === "USDC") return BASE_TOKEN_CONTRACTS[network].USDC;
+    // ETH uses address(0)
+    return "0x0000000000000000000000000000000000000000";
   }
 
   private async invalidateCircleCache(circleId: string): Promise<void> {

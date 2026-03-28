@@ -8,6 +8,7 @@ import {
   PayoutFrequency,
   CircleStatus,
   Currency,
+  Chain,
 } from "../../../shared/enums/circle.enums";
 import {
   PAYOUT_QUEUE_NAME,
@@ -82,9 +83,24 @@ export class PayoutSchedulerService implements OnModuleInit {
       const recipientUser = await this.userRepository.findById(
         recipient.userId.toString(),
       );
-      if (!recipientUser?.nearAccountId) {
+
+      const chain = circle.chain || Chain.NEAR;
+
+      if (!recipientUser) {
+        this.logger.error(
+          `User ${recipient.userId} not found, cannot schedule payout for round ${round}`,
+        );
+        continue;
+      }
+      if (chain === Chain.NEAR && !recipientUser.nearAccountId) {
         this.logger.error(
           `User ${recipient.userId} does not have a NEAR account, cannot schedule payout for round ${round}`,
+        );
+        continue;
+      }
+      if (chain === Chain.BASE && !recipientUser.baseAddress) {
+        this.logger.error(
+          `User ${recipient.userId} does not have a Base account, cannot schedule payout for round ${round}`,
         );
         continue;
       }
@@ -96,7 +112,11 @@ export class PayoutSchedulerService implements OnModuleInit {
         circleId: circle._id.toString(),
         roundNumber: round,
         recipientUserId: recipient.userId.toString(),
-        recipientNearAccountId: recipientUser.nearAccountId,
+        recipientNearAccountId:
+          chain === Chain.NEAR ? recipientUser.nearAccountId : undefined,
+        recipientBaseAddress:
+          chain === Chain.BASE ? recipientUser.baseAddress : undefined,
+        chain,
         payoutAmount,
         currency: circle.contributionSettings.currency,
         scheduledPayoutDate: payoutDate.toISOString(),

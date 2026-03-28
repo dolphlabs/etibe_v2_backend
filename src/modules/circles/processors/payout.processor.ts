@@ -7,6 +7,7 @@ import { TransactionRepository } from "../../transactions/repositories/transacti
 import { NotificationService } from "../../notifications/services/notification.service";
 import { UserRepository } from "../../users/repositories/user.repository";
 import { NearAccountService } from "../../blockchain/services/near-account.service";
+import { BaseAccountService } from "../../blockchain/services/base-account.service";
 import {
   VaultService,
   EncryptedData,
@@ -17,6 +18,7 @@ import { NotificationType } from "../../../shared/enums";
 import {
   CircleStatus,
   Currency,
+  Chain,
   TransactionType,
   TransactionStatus,
 } from "../../../shared/enums/circle.enums";
@@ -44,6 +46,7 @@ export class PayoutProcessor extends WorkerHost {
     private readonly transactionRepository: TransactionRepository,
     private readonly userRepository: UserRepository,
     private readonly nearAccountService: NearAccountService,
+    private readonly baseAccountService: BaseAccountService,
     private readonly vaultService: VaultService,
     private readonly notificationService: NotificationService,
     private readonly eventEmitter: EventEmitter2,
@@ -112,11 +115,14 @@ export class PayoutProcessor extends WorkerHost {
     reason?: string;
     circle?: CircleDocument;
     recipientNearAccountId?: string;
+    recipientBaseAddress?: string;
   }> {
     const circle = await this.circleRepository.findById(data.circleId);
     if (!circle) {
       return { eligible: false, reason: "Circle not found" };
     }
+
+    const chain = data.chain || circle.chain || Chain.NEAR;
 
     if (circle.status !== CircleStatus.ACTIVE) {
       return {
@@ -161,11 +167,21 @@ export class PayoutProcessor extends WorkerHost {
     const recipientUser = await this.userRepository.findById(
       data.recipientUserId,
     );
-    if (!recipientUser?.nearAccountId) {
-      return {
-        eligible: false,
-        reason: "Recipient does not have a NEAR account",
-      };
+
+    if (chain === Chain.BASE) {
+      if (!recipientUser?.baseAddress) {
+        return {
+          eligible: false,
+          reason: "Recipient does not have a Base account",
+        };
+      }
+    } else {
+      if (!recipientUser?.nearAccountId) {
+        return {
+          eligible: false,
+          reason: "Recipient does not have a NEAR account",
+        };
+      }
     }
 
     const hasBalance = await this.verifyContractBalance(
@@ -183,7 +199,8 @@ export class PayoutProcessor extends WorkerHost {
     return {
       eligible: true,
       circle,
-      recipientNearAccountId: recipientUser.nearAccountId,
+      recipientNearAccountId: recipientUser?.nearAccountId,
+      recipientBaseAddress: recipientUser?.baseAddress,
     };
   }
 
@@ -220,13 +237,15 @@ export class PayoutProcessor extends WorkerHost {
     data: PayoutJobData,
     circle: CircleDocument,
   ): Promise<{ txHash: string }> {
-    this.logger.log(
-      `[PAYOUT_EXECUTE] Sending ${data.payoutAmount} ${data.currency} from ${data.contractAddress} to ${data.recipientNearAccountId}`,
-    );
+    const chain = data.chain || circle.chain || Chain.NEAR;
+    const recipientAddress =
+      chain === Chain.BASE
+        ? data.recipientBaseAddress
+        : data.recipientNearAccountId;
 
-    // For circle contract payouts, we need to call the circle contract's payout method
-    // In a real implementation, the circle contract would have a "release_payout" function
-    // that the backend can call using the master key as the circle contract owner
+    this.logger.log(
+      `[PAYOUT_EXECUTE] Sending ${data.payoutAmount} ${data.currency} on ${chain} from ${data.contractAddress} to ${recipientAddress}`,
+    );
 
     try {
       const pendingTransaction = await this.transactionRepository.create({
@@ -236,8 +255,12 @@ export class PayoutProcessor extends WorkerHost {
         circleId: new Types.ObjectId(data.circleId),
         amount: data.payoutAmount,
         currency: data.currency as Currency,
+        chain,
         round: data.roundNumber,
-        nearAccountId: data.recipientNearAccountId,
+        nearAccountId:
+          chain === Chain.NEAR ? data.recipientNearAccountId : undefined,
+        baseAddress:
+          chain === Chain.BASE ? data.recipientBaseAddress : undefined,
         metadata: {
           scheduledDate: data.scheduledPayoutDate,
           contractAddress: data.contractAddress,
@@ -246,23 +269,24 @@ export class PayoutProcessor extends WorkerHost {
 
       let txHash: string;
 
-      if (data.currency === Currency.NEAR) {
-        // For NEAR transfers, we use the master account to call the circle contract
-        // The circle contract would have a method like: release_payout(recipient_id, amount)
+      if (chain === Chain.BASE) {
+        // For Base circles, call releasePayout on the Solidity contract
+        txHash = await this.executeBasePayout(data.contractAddress);
+      } else if (data.currency === Currency.NEAR) {
         txHash = await this.executeNearPayout(
           data.contractAddress,
-          data.recipientNearAccountId,
+          data.recipientNearAccountId!,
           data.payoutAmount,
         );
       } else {
-        // For token transfers (USDT, USDC)
         txHash = await this.executeTokenPayout(
           data.contractAddress,
-          data.recipientNearAccountId,
+          data.recipientNearAccountId!,
           data.payoutAmount,
           data.currency,
         );
       }
+
       await this.transactionRepository.confirmTransaction(
         pendingTransaction._id.toString(),
         txHash,
@@ -272,6 +296,17 @@ export class PayoutProcessor extends WorkerHost {
     } catch (error: any) {
       this.logger.error(`Payout execution failed: ${error.message}`);
       throw new Error(`Payout execution failed: ${error.message}`);
+    }
+  }
+
+  private async executeBasePayout(contractAddress: string): Promise<string> {
+    try {
+      const result =
+        await this.baseAccountService.releasePayout(contractAddress);
+      return result.txHash;
+    } catch (error: any) {
+      this.logger.error(`Base payout failed: ${error.message}`);
+      throw error;
     }
   }
 
