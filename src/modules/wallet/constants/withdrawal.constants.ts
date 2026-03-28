@@ -40,18 +40,24 @@ export const ASSET_DECIMALS: Record<string, number> = {
   NEAR: 24,
   USDT: 6,
   USDC: 6,
+  ETH: 18,
+  CNGN: 6,
 };
 
 export const MIN_WITHDRAWAL_AMOUNTS: Record<string, number> = {
   NEAR: 0.01,
   USDT: 0.1,
   USDC: 0.1,
+  ETH: 0.0001,
+  CNGN: 100,
 };
 
 export const MAX_WITHDRAWAL_AMOUNTS: Record<string, number> = {
   NEAR: 10000,
   USDT: 100000,
   USDC: 100000,
+  ETH: 100,
+  CNGN: 10000000,
 };
 
 export const STORAGE_DEPOSIT_AMOUNT = "1250000000000000000000"; // 0.00125 NEAR
@@ -62,10 +68,12 @@ export const GAS_FOR_STORAGE_DEPOSIT = "10000000000000"; // 10 TGas
 export interface WithdrawalJobData {
   transactionId: string;
   userId: string;
-  userNearAccountId: string;
+  userNearAccountId?: string;
+  userBaseAddress?: string;
   destinationAddress: string;
   amount: string;
-  asset: "NEAR" | "USDT" | "USDC";
+  asset: "NEAR" | "USDT" | "USDC" | "ETH" | "CNGN";
+  chain: "BASE" | "NEAR";
   idempotencyKey: string;
   retryCount?: number;
   requiresStorageDeposit?: boolean;

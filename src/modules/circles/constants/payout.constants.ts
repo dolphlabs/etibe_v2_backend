@@ -42,9 +42,11 @@ export interface PayoutJobData {
   circleId: string;
   roundNumber: number;
   recipientUserId: string;
-  recipientNearAccountId: string;
+  recipientNearAccountId?: string;
+  recipientBaseAddress?: string;
   payoutAmount: string;
   currency: string;
+  chain: "BASE" | "NEAR";
   scheduledPayoutDate: string;
   contractAddress: string;
   retryCount?: number;

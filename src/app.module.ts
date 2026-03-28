@@ -20,6 +20,7 @@ import {
   resendConfig,
   vaultConfig,
   cloudinaryConfig,
+  baseConfig,
 } from "./config";
 import {
   GlobalExceptionFilter,
@@ -55,6 +56,7 @@ import { NotificationsModule } from "./modules/notifications";
         resendConfig,
         vaultConfig,
         cloudinaryConfig,
+        baseConfig,
       ],
       envFilePath: [".env.local", ".env"],
       expandVariables: true,

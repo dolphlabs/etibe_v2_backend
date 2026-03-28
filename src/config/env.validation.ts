@@ -75,6 +75,23 @@ export class EnvironmentVariables {
 
   @IsString()
   CLOUDINARY_API_KEY!: string;
+
+  // Base chain configuration (optional — NEAR-only deployments still boot)
+  @IsOptional()
+  @IsIn(["mainnet", "sepolia"])
+  BASE_NETWORK?: string;
+
+  @IsOptional()
+  @IsString()
+  BASE_RPC_URL?: string;
+
+  @IsOptional()
+  @IsString()
+  BASE_MASTER_PRIVATE_KEY?: string;
+
+  @IsOptional()
+  @IsString()
+  BASE_PAYOUT_CONTRACT_ADDRESS?: string;
 }
 
 export function validate(

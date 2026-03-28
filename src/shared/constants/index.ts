@@ -39,3 +39,21 @@ export const NEAR_CONFIG = {
   TESTNET_RPC: "https://rpc.testnet.near.org",
   MAINNET_RPC: "https://rpc.mainnet.near.org",
 } as const;
+
+export const BASE_CONFIG = {
+  SEPOLIA_RPC: "https://sepolia.base.org",
+  MAINNET_RPC: "https://mainnet.base.org",
+  CHAIN_ID_MAINNET: 8453,
+  CHAIN_ID_SEPOLIA: 84532,
+} as const;
+
+export const BASE_TOKEN_CONTRACTS = {
+  mainnet: {
+    CNGN: "0x46C85152bFe9f96829aA94755D9f915F9B10EF5F",
+    USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  },
+  sepolia: {
+    CNGN: "0xe2387F04d3858e7Cb64Ef5Ed6617f9B2fcEAfa2",
+    USDC: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  },
+} as const;
