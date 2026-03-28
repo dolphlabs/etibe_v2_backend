@@ -1,0 +1,168 @@
+{
+  "abi": [
+    {
+      "inputs": [
+        { "internalType": "string", "name": "_name", "type": "string" },
+        { "internalType": "address", "name": "_creator", "type": "address" },
+        { "internalType": "address", "name": "_tokenAddress", "type": "address" },
+        { "internalType": "uint256", "name": "_contributionAmount", "type": "uint256" },
+        { "internalType": "uint256", "name": "_maxMembers", "type": "uint256" },
+        { "internalType": "uint256", "name": "_gracePeriodDays", "type": "uint256" }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "inputs": [
+        { "internalType": "address", "name": "_member", "type": "address" },
+        { "internalType": "uint256", "name": "_position", "type": "uint256" }
+      ],
+      "name": "addMember",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        { "internalType": "address[]", "name": "_order", "type": "address[]" }
+      ],
+      "name": "setPayoutOrder",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "startCircle",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "contributeETH",
+      "outputs": [],
+      "stateMutability": "payable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        { "internalType": "uint256", "name": "amount", "type": "uint256" }
+      ],
+      "name": "contributeToken",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "releasePayout",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        { "internalType": "address", "name": "to", "type": "address" }
+      ],
+      "name": "emergencyWithdraw",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "getCircleState",
+      "outputs": [
+        {
+          "components": [
+            { "internalType": "string", "name": "name", "type": "string" },
+            { "internalType": "address", "name": "creator", "type": "address" },
+            { "internalType": "address", "name": "tokenAddress", "type": "address" },
+            { "internalType": "uint256", "name": "contributionAmount", "type": "uint256" },
+            { "internalType": "uint256", "name": "maxMembers", "type": "uint256" },
+            { "internalType": "uint256", "name": "currentRound", "type": "uint256" },
+            { "internalType": "uint256", "name": "totalRounds", "type": "uint256" },
+            { "internalType": "bool", "name": "isActive", "type": "bool" },
+            { "internalType": "uint256", "name": "memberCount", "type": "uint256" }
+          ],
+          "internalType": "struct EtibeCircle.CircleState",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        { "internalType": "address", "name": "member", "type": "address" },
+        { "internalType": "uint256", "name": "round", "type": "uint256" }
+      ],
+      "name": "getMemberContribution",
+      "outputs": [
+        { "internalType": "bool", "name": "", "type": "bool" }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        { "internalType": "uint256", "name": "round", "type": "uint256" }
+      ],
+      "name": "getRoundProgress",
+      "outputs": [
+        { "internalType": "uint256", "name": "contributed", "type": "uint256" },
+        { "internalType": "uint256", "name": "total", "type": "uint256" }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        { "indexed": false, "internalType": "string", "name": "name", "type": "string" },
+        { "indexed": false, "internalType": "address", "name": "creator", "type": "address" },
+        { "indexed": false, "internalType": "uint256", "name": "contributionAmount", "type": "uint256" }
+      ],
+      "name": "CircleInitialized",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        { "indexed": true, "internalType": "address", "name": "member", "type": "address" },
+        { "indexed": false, "internalType": "uint256", "name": "position", "type": "uint256" }
+      ],
+      "name": "MemberAdded",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        { "indexed": true, "internalType": "address", "name": "from", "type": "address" },
+        { "indexed": false, "internalType": "uint256", "name": "round", "type": "uint256" },
+        { "indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256" }
+      ],
+      "name": "ContributionReceived",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        { "indexed": true, "internalType": "address", "name": "to", "type": "address" },
+        { "indexed": false, "internalType": "uint256", "name": "round", "type": "uint256" },
+        { "indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256" }
+      ],
+      "name": "PayoutReleased",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [],
+      "name": "CircleCompleted",
+      "type": "event"
+    }
+  ],
+  "bytecode": "0x"
+}
