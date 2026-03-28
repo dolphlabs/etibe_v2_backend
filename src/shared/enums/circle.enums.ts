@@ -1,10 +1,24 @@
 import { Types } from "mongoose";
 
+export enum Chain {
+  BASE = "BASE",
+  NEAR = "NEAR",
+}
+
 export enum Currency {
   NEAR = "NEAR",
+  ETH = "ETH",
   USDT = "USDT",
   USDC = "USDC",
+  CNGN = "CNGN",
 }
+
+export const CHAIN_CURRENCIES: Record<Chain, Currency[]> = {
+  [Chain.BASE]: [Currency.ETH, Currency.CNGN, Currency.USDC],
+  [Chain.NEAR]: [Currency.NEAR, Currency.USDT, Currency.USDC],
+};
+
+export const DEFAULT_CHAIN = Chain.BASE;
 
 export enum CircleStatus {
   PENDING = "PENDING",

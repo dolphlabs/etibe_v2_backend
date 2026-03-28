@@ -83,3 +83,20 @@ export const resendConfig = registerAs("resend", () => ({
 export const vaultConfig = registerAs("vault", () => ({
   masterKey: process.env.MASTER_ENCRYPTION_KEY,
 }));
+
+export const baseConfig = registerAs("base", () => ({
+  network: process.env.BASE_NETWORK || "sepolia",
+  rpcUrl:
+    process.env.BASE_RPC_URL ||
+    (process.env.BASE_NETWORK === "mainnet"
+      ? "https://mainnet.base.org"
+      : "https://sepolia.base.org"),
+  chainId:
+    process.env.BASE_NETWORK === "mainnet" ? 8453 : 84532,
+  masterPrivateKey: process.env.BASE_MASTER_PRIVATE_KEY,
+  payoutContractAddress: process.env.BASE_PAYOUT_CONTRACT_ADDRESS,
+  explorerUrl:
+    process.env.BASE_NETWORK === "mainnet"
+      ? "https://basescan.org"
+      : "https://sepolia.basescan.org",
+}));
