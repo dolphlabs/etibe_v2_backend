@@ -14,7 +14,13 @@ import {
   Matches,
 } from "class-validator";
 import { Type, Transform } from "class-transformer";
-import { Currency, PayoutFrequency } from "../../../shared/enums/circle.enums";
+import {
+  Chain,
+  Currency,
+  PayoutFrequency,
+  CHAIN_CURRENCIES,
+  DEFAULT_CHAIN,
+} from "../../../shared/enums/circle.enums";
 
 export class ContributionSettingsDto {
   @IsString()
@@ -65,6 +71,12 @@ export class CreateCircleDto {
   @IsOptional()
   @IsString()
   logoUrl?: string;
+
+  @IsOptional()
+  @IsEnum(Chain, {
+    message: `Chain must be one of: ${Object.values(Chain).join(", ")}`,
+  })
+  chain?: Chain;
 
   @ValidateNested()
   @Type(() => ContributionSettingsDto)
@@ -158,6 +170,7 @@ export class CircleResponseDto {
   name!: string;
   description?: string;
   logoUrl?: string;
+  chain!: string;
   status!: string;
   contractAddress?: string;
   contributionSettings!: {
@@ -239,8 +252,10 @@ export class PayoutInfoDto {
 export class InitiateCircleResponseDto {
   circleId!: string;
   inviteCode!: string;
-  creatorNearAccountId!: string;
-  factoryContractId!: string;
+  chain!: string;
+  creatorNearAccountId?: string;
+  creatorBaseAddress?: string;
+  factoryContractId?: string;
   initArgs!: {
     name: string;
     contribution_amount: string;

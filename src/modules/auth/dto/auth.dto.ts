@@ -105,21 +105,27 @@ export class AuthResponseDto {
     avatar?: string;
     isVerified: boolean;
     nearWalletAddress?: string;
+    baseAddress?: string;
+    preferredChain?: string;
   };
   message!: string;
 }
 
 export class VerifyEmailResponseDto {
   user!: AuthResponseDto["user"];
-  nearAccountId!: string;
+  nearAccountId?: string;
+  baseAddress?: string;
   message!: string;
 }
 
 export class OnboardingStatusDto {
   isEmailVerified!: boolean;
   hasNearAccount!: boolean;
+  hasBaseAccount!: boolean;
   onboardingCompleted!: boolean;
   nearAccountId?: string;
+  baseAddress?: string;
+  preferredChain?: string;
 }
 
 export class SessionResponseDto {
