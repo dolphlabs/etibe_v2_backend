@@ -35,6 +35,11 @@ coverage/
 # Test
 test-results/
 
+# Hardhat
+artifacts/
+cache/
+typechain-types/
+
 # Misc
 *.tsbuildinfo
 .eslintcache
