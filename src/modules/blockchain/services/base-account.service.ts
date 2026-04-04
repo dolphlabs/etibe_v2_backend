@@ -177,11 +177,16 @@ export class BaseAccountService implements OnModuleInit {
 
     const tokenAddresses = this.getTokenAddresses();
 
+    this.logger.debug(
+      `Querying token balances for ${address} — cNGN contract: ${tokenAddresses.CNGN}, USDC contract: ${tokenAddresses.USDC}, network: ${this.network}`,
+    );
+
     try {
       balances.CNGN = await this.getTokenBalance(
         address,
         tokenAddresses.CNGN,
       );
+      this.logger.debug(`cNGN raw balance for ${address}: ${balances.CNGN}`);
     } catch (error: any) {
       this.logger.warn(
         `Failed to get cNGN balance for ${address}: ${error.message}`,
