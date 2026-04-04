@@ -24,12 +24,12 @@ export class VerifiedUserGuard implements CanActivate {
       throw new ForbiddenException("Authentication required");
     }
 
-    if (!user.nearAccountId) {
+    if (!user.nearAccountId && !user.baseAddress) {
       this.logger.warn(
-        `User ${user.id} attempted to access verified-only resource without NEAR wallet`
+        `User ${user.id} attempted to access verified-only resource without any wallet`,
       );
       throw new ForbiddenException(
-        "Please complete your onboarding to access this feature. A NEAR wallet is required."
+        "Please complete your onboarding to access this feature. A wallet is required.",
       );
     }
 

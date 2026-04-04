@@ -44,9 +44,9 @@ export class WalletController {
       throw new BadRequestException("Device ID header is required");
     }
 
-    if (!user.nearAccountId) {
+    if (!user.nearAccountId && !user.baseAddress) {
       throw new BadRequestException(
-        "NEAR wallet not set up. Please complete onboarding."
+        "Wallet not set up. Please complete onboarding.",
       );
     }
 
@@ -88,9 +88,9 @@ export class WalletController {
       );
     }
 
-    if (!user.nearAccountId) {
+    if (!user.nearAccountId && !user.baseAddress) {
       throw new BadRequestException(
-        "NEAR wallet not set up. Please complete onboarding."
+        "Wallet not set up. Please complete onboarding.",
       );
     }
 
