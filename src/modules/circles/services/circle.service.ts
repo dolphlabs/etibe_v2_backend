@@ -223,6 +223,13 @@ export class CircleService {
       );
       contractAddress = result.contractAddress;
       txHash = result.txHash;
+
+      // Add the creator as the first member on-chain
+      await this.baseAccountService.addMemberToContract(
+        contractAddress,
+        creator!.baseAddress!,
+        1,
+      );
     } else {
       const result = await this.nearAccountService.deployCircleContract(
         circleId,
@@ -511,6 +518,25 @@ export class CircleService {
 
     if (!updatedCircle) {
       throw new BadRequestException("Failed to join circle");
+    }
+
+    // Add member on-chain for Base circles
+    const circleChain = circle.chain || Chain.NEAR;
+    if (circleChain === Chain.BASE && circle.contractAddress) {
+      const joiningUser = await this.userRepository.findById(userId);
+      if (joiningUser?.baseAddress) {
+        try {
+          await this.baseAccountService.addMemberToContract(
+            circle.contractAddress,
+            joiningUser.baseAddress,
+            nextPosition,
+          );
+        } catch (error: any) {
+          this.logger.error(
+            `Failed to add member on-chain: ${error.message}`,
+          );
+        }
+      }
     }
 
     // Record join transaction
@@ -1149,6 +1175,35 @@ export class CircleService {
     if (!circle.contractAddress) {
       throw new BadRequestException(
         "Circle contract not deployed. Please activate the circle first.",
+      );
+    }
+
+    // Start the on-chain contract for Base circles
+    const chain = circle.chain || Chain.NEAR;
+    if (chain === Chain.BASE) {
+      // Build payout order from member Base addresses sorted by position
+      const sortedMembers = [...activeMembers].sort(
+        (a, b) => a.position - b.position,
+      );
+      const payoutOrder: string[] = [];
+      for (const member of sortedMembers) {
+        const memberUser = await this.userRepository.findById(
+          member.userId.toString(),
+        );
+        if (!memberUser?.baseAddress) {
+          throw new BadRequestException(
+            `Member ${member.userId} does not have a Base address. All members need Base accounts.`,
+          );
+        }
+        payoutOrder.push(memberUser.baseAddress);
+      }
+
+      await this.baseAccountService.startCircleContract(
+        circle.contractAddress,
+        payoutOrder,
+      );
+      this.logger.log(
+        `Base circle contract started on-chain: ${circle.contractAddress}`,
       );
     }
 
