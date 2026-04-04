@@ -236,7 +236,7 @@ export class BaseAccountService implements OnModuleInit {
 
       const decimals = 6; // cNGN and USDC both use 6 decimals
       const contributionAmountAtomic = parseUnits(
-        contributionAmount,
+        this.toPlainString(contributionAmount),
         tokenAddress === ethers.ZeroAddress ? 18 : decimals,
       );
 
@@ -288,11 +288,13 @@ export class BaseAccountService implements OnModuleInit {
     try {
       let txHash: string;
 
+      const amountStr = this.toPlainString(amount);
+
       if (currency === "ETH") {
         // Native ETH contribution — send directly to contract
         const tx = await userWallet.sendTransaction({
           to: circleContractAddress,
-          value: parseEther(amount),
+          value: parseEther(amountStr),
         });
         const receipt = await tx.wait();
         txHash = receipt!.hash;
@@ -305,7 +307,7 @@ export class BaseAccountService implements OnModuleInit {
           userWallet,
         );
 
-        const atomicAmount = parseUnits(amount, 6);
+        const atomicAmount = parseUnits(amountStr, 6);
 
         // Approve the circle contract to spend tokens
         const approveTx = await tokenContract.approve(
@@ -430,6 +432,18 @@ export class BaseAccountService implements OnModuleInit {
       );
     }
     return address;
+  }
+
+  /**
+   * Safely converts a value to a plain string.
+   * Handles Mongoose Decimal128 objects ({ $numberDecimal: "..." }).
+   */
+  private toPlainString(value: any): string {
+    if (typeof value === "string") return value;
+    if (typeof value === "number") return String(value);
+    if (value && value.$numberDecimal) return value.$numberDecimal;
+    if (value && typeof value.toString === "function") return value.toString();
+    return String(value);
   }
 
   getTokenAddresses(): { CNGN: string; USDC: string } {
