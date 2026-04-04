@@ -413,7 +413,8 @@ export class BaseAccountService implements OnModuleInit {
       this.masterWallet,
     );
 
-    const tx = await circleContract.releasePayout();
+    const nonce = await this.masterWallet.getNonce("pending");
+    const tx = await circleContract.releasePayout({ nonce });
     const receipt = await tx.wait();
 
     this.logger.log(
@@ -440,7 +441,9 @@ export class BaseAccountService implements OnModuleInit {
       this.masterWallet,
     );
 
-    const tx = await circleContract.addMember(memberAddress, position);
+    // Use "pending" nonce to avoid nonce collisions after recent transactions
+    const nonce = await this.masterWallet.getNonce("pending");
+    const tx = await circleContract.addMember(memberAddress, position, { nonce });
     const receipt = await tx.wait();
 
     this.logger.log(
@@ -466,15 +469,17 @@ export class BaseAccountService implements OnModuleInit {
       this.masterWallet,
     );
 
-    // Set payout order first
-    const orderTx = await circleContract.setPayoutOrder(payoutOrder);
+    // Set payout order first (use pending nonce)
+    let nonce = await this.masterWallet.getNonce("pending");
+    const orderTx = await circleContract.setPayoutOrder(payoutOrder, { nonce });
     await orderTx.wait();
     this.logger.log(
       `Set payout order on ${circleContractAddress}: ${payoutOrder.join(", ")}`,
     );
 
     // Then start the circle
-    const startTx = await circleContract.startCircle();
+    nonce = await this.masterWallet.getNonce("pending");
+    const startTx = await circleContract.startCircle({ nonce });
     const receipt = await startTx.wait();
     this.logger.log(
       `Started circle contract ${circleContractAddress}, txHash: ${receipt!.hash}`,
