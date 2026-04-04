@@ -37,6 +37,7 @@ import {
 } from "../../../shared/types/session.types";
 import { UserService } from "@modules/users";
 import { NearAccountService } from "../../blockchain/services/near-account.service";
+import { BaseAccountService } from "../../blockchain/services/base-account.service";
 import { CircleRepository } from "../../circles/repositories/circle.repository";
 import { TransactionRepository } from "../../transactions/repositories/transaction.repository";
 
@@ -48,6 +49,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly userService: UserService,
     private readonly nearAccountService: NearAccountService,
+    private readonly baseAccountService: BaseAccountService,
     private readonly circleRepository: CircleRepository,
     private readonly transactionRepository: TransactionRepository,
   ) {}
@@ -85,16 +87,14 @@ export class AuthController {
   ) {
     const deviceId = this.extractDeviceId(request);
 
-    const { user, nearAccountId } = await this.authService.verifyEmail(
-      dto.email,
-      dto,
-      deviceId,
-    );
+    const { user, nearAccountId, baseAddress } =
+      await this.authService.verifyEmail(dto.email, dto, deviceId);
 
     return {
-      message: "Email verified successfully. Your NEAR wallet is ready!",
+      message: "Email verified successfully. Your wallets are ready!",
       user: this.sanitizeUser(user),
       nearAccountId,
+      baseAddress,
       onboardingCompleted: true,
     };
   }
@@ -195,40 +195,63 @@ export class AuthController {
 
     const result = await this.userService.findById(user.id);
 
-    let walletBalance = result.walletBalance || {
+    let walletBalance: Record<string, string> = (result.walletBalance as any) || {
       NEAR: "0",
       USDT: "0",
       USDC: "0",
+      ETH: "0",
+      CNGN: "0",
     };
 
+    // Fetch NEAR balances
     if (result.nearAccountId) {
       try {
         const onChainBalances = await this.nearAccountService.getWalletBalances(
           result.nearAccountId,
         );
-
         walletBalance = {
+          ...walletBalance,
           NEAR: onChainBalances.NEAR,
           USDT: onChainBalances.USDT,
           USDC: onChainBalances.USDC,
         };
-
-        this.userService
-          .update(user.id, {
-            walletBalance: {
-              ...walletBalance,
-              lastUpdatedAt: new Date(),
-            },
-          } as any)
-          .catch((err) =>
-            this.logger.warn("Failed to update wallet balance:", err),
-          );
       } catch (error) {
         this.logger.warn(
           `Failed to fetch on-chain balances for ${result.nearAccountId}`,
         );
       }
     }
+
+    // Fetch Base balances
+    if (result.baseAddress) {
+      try {
+        const baseBalances = await this.baseAccountService.getWalletBalances(
+          result.baseAddress,
+        );
+        walletBalance = {
+          ...walletBalance,
+          ETH: baseBalances.ETH,
+          USDC: walletBalance.USDC !== "0" ? walletBalance.USDC : baseBalances.USDC,
+          CNGN: baseBalances.CNGN,
+        };
+      } catch (error) {
+        this.logger.warn(
+          `Failed to fetch Base balances for ${result.baseAddress}`,
+        );
+      }
+    }
+
+    // Update cached balances in background
+    this.userService
+      .update(user.id, {
+        walletBalance: {
+          ...walletBalance,
+          lastUpdatedAt: new Date(),
+        },
+      } as any)
+      .catch((err) =>
+        this.logger.warn("Failed to update wallet balance:", err),
+      );
 
     const [channelsJoined, completedContributions] = await Promise.all([
       this.circleRepository.countUserCircles(user.id),
@@ -251,6 +274,8 @@ export class AuthController {
         isEmailVerified: result.isEmailVerified,
         deletedAt: result.deletedAt,
         nearAccountId: result.nearAccountId,
+        baseAddress: result.baseAddress,
+        preferredChain: result.preferredChain,
         walletBalance,
         stats: {
           channelsJoined,
@@ -431,6 +456,8 @@ export class AuthController {
       avatar: user.avatar,
       isVerified: user.isVerified,
       nearAccountId: user.nearAccountId,
+      baseAddress: user.baseAddress,
+      preferredChain: user.preferredChain,
     };
   }
 
