@@ -39,8 +39,10 @@ export class CircleController {
     @Body() dto: CreateCircleDto,
     @CurrentUser() user: AuthenticatedUser
   ): Promise<{ data: CircleResponseDto; message: string }> {
-    if (!user.nearAccountId) {
-      throw new BadRequestException("NEAR wallet required to create a circle");
+    if (!user.nearAccountId && !user.baseAddress) {
+      throw new BadRequestException(
+        "A verified wallet is required to create a circle",
+      );
     }
 
     const circle = await this.circleService.createCircle(user.id, dto);
@@ -124,7 +126,7 @@ export class CircleController {
 
     const circle = await this.circleService.joinCircle(
       user.id,
-      user.nearAccountId || "",
+      user.nearAccountId || user.baseAddress || "",
       dto
     );
 
