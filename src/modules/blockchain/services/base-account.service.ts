@@ -423,6 +423,66 @@ export class BaseAccountService implements OnModuleInit {
     return { txHash: receipt!.hash };
   }
 
+  async addMemberToContract(
+    circleContractAddress: string,
+    memberAddress: string,
+    position: number,
+  ): Promise<{ txHash: string }> {
+    if (!this.initialized) {
+      throw new BadRequestException("Base account service not initialized");
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const contractArtifact = require("../abis/EtibeCircle.json");
+    const circleContract = new Contract(
+      circleContractAddress,
+      contractArtifact.abi,
+      this.masterWallet,
+    );
+
+    const tx = await circleContract.addMember(memberAddress, position);
+    const receipt = await tx.wait();
+
+    this.logger.log(
+      `Added member ${memberAddress} at position ${position} to ${circleContractAddress}`,
+    );
+
+    return { txHash: receipt!.hash };
+  }
+
+  async startCircleContract(
+    circleContractAddress: string,
+    payoutOrder: string[],
+  ): Promise<{ txHash: string }> {
+    if (!this.initialized) {
+      throw new BadRequestException("Base account service not initialized");
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const contractArtifact = require("../abis/EtibeCircle.json");
+    const circleContract = new Contract(
+      circleContractAddress,
+      contractArtifact.abi,
+      this.masterWallet,
+    );
+
+    // Set payout order first
+    const orderTx = await circleContract.setPayoutOrder(payoutOrder);
+    await orderTx.wait();
+    this.logger.log(
+      `Set payout order on ${circleContractAddress}: ${payoutOrder.join(", ")}`,
+    );
+
+    // Then start the circle
+    const startTx = await circleContract.startCircle();
+    const receipt = await startTx.wait();
+    this.logger.log(
+      `Started circle contract ${circleContractAddress}, txHash: ${receipt!.hash}`,
+    );
+
+    return { txHash: receipt!.hash };
+  }
+
   getTokenAddress(currency: string): string {
     const addresses = this.getTokenAddresses();
     const address = addresses[currency as keyof typeof addresses];
