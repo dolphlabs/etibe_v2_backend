@@ -5,7 +5,7 @@
   "compilerOptions": {
     "deleteOutDir": true,
     "plugins": [],
-    "assets": [],
+    "assets": ["modules/blockchain/abis/*.json"],
     "watchAssets": true
   }
 }
