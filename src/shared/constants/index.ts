@@ -53,7 +53,7 @@ export const BASE_TOKEN_CONTRACTS = {
     USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   },
   sepolia: {
-    CNGN: "0xEFdF04BAfE0ebabb5F5cD9e3f36564f51CFe1530",
+    CNGN: "0xe2387f04d3858e7cb64ef5ed6617f9b2fceeafa2",
     USDC: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
   },
 } as const;
