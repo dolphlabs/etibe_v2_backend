@@ -310,9 +310,12 @@ export class BaseAccountService implements OnModuleInit {
         const atomicAmount = parseUnits(amountStr, 6);
 
         // Approve the circle contract to spend tokens
+        // Get nonce explicitly and increment manually for the second tx
+        const approveNonce = await userWallet.getNonce("latest");
         const approveTx = await tokenContract.approve(
           circleContractAddress,
           atomicAmount,
+          { nonce: approveNonce },
         );
         await approveTx.wait();
 
@@ -325,8 +328,10 @@ export class BaseAccountService implements OnModuleInit {
           userWallet,
         );
 
+        // Manually increment nonce since we know approve just consumed one
         const contributeTx = await circleContract.contributeToken(
           atomicAmount,
+          { nonce: approveNonce + 1 },
         );
         const receipt = await contributeTx.wait();
         txHash = receipt!.hash;
