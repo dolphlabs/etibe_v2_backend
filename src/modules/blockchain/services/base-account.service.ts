@@ -285,6 +285,9 @@ export class BaseAccountService implements OnModuleInit {
 
     const userWallet = this.decryptAndGetWallet(userEncryptedPrivateKey);
 
+    // Ensure user has enough ETH for gas fees (master wallet tops up if needed)
+    await this.ensureGasBalance(userWallet.address);
+
     try {
       let txHash: string;
 
@@ -364,6 +367,9 @@ export class BaseAccountService implements OnModuleInit {
 
     const wallet = this.decryptAndGetWallet(fromEncryptedKey);
 
+    // Ensure user has enough ETH for gas fees (master wallet tops up if needed)
+    await this.ensureGasBalance(wallet.address);
+
     const tx = await wallet.sendTransaction({
       to: toAddress,
       value: parseEther(amountEth),
@@ -390,6 +396,10 @@ export class BaseAccountService implements OnModuleInit {
     }
 
     const wallet = this.decryptAndGetWallet(fromEncryptedKey);
+
+    // Ensure user has enough ETH for gas fees (master wallet tops up if needed)
+    await this.ensureGasBalance(wallet.address);
+
     const tokenContract = new Contract(tokenAddress, ERC20_ABI, wallet);
 
     const atomicAmount = parseUnits(amount, decimals);
@@ -491,6 +501,39 @@ export class BaseAccountService implements OnModuleInit {
     );
 
     return { txHash: receipt!.hash };
+  }
+
+  /**
+   * Ensures a user wallet has enough ETH to cover gas fees.
+   * If the balance is below the threshold, the master wallet sends a small
+   * top-up so the user never has to worry about gas.
+   */
+  private async ensureGasBalance(userAddress: string): Promise<void> {
+    const MIN_GAS_BALANCE = parseEther("0.0005"); // ~$1 worth of ETH — enough for several txs
+    const GAS_TOP_UP_AMOUNT = "0.001"; // Send a bit more to reduce frequency of top-ups
+
+    const balance = await this.provider.getBalance(userAddress);
+
+    if (balance >= MIN_GAS_BALANCE) {
+      return;
+    }
+
+    this.logger.log(
+      `User ${userAddress} has insufficient gas (${formatEther(balance)} ETH). Sending ${GAS_TOP_UP_AMOUNT} ETH from master wallet.`,
+    );
+
+    const nonce = await this.masterWallet.getNonce("pending");
+    const tx = await this.masterWallet.sendTransaction({
+      to: userAddress,
+      value: parseEther(GAS_TOP_UP_AMOUNT),
+      nonce,
+    });
+
+    await tx.wait();
+
+    this.logger.log(
+      `Gas top-up complete for ${userAddress}, txHash: ${tx.hash}`,
+    );
   }
 
   getTokenAddress(currency: string): string {
