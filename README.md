@@ -61,6 +61,19 @@ cp .env.example .env
 pnpm dev
 ```
 
+## ⛓️ Smart Contracts Setup
+
+The EVM smart contracts (written in Solidity) are managed using Hardhat. Since compiled artifacts, caches, and TypeChain typings are git-omitted, you need to compile them locally on initial setup.
+
+```bash
+# Compile Solidity contracts and copy ABIs to the NestJS application
+pnpm compile:sol
+```
+
+This command runs:
+1. `hardhat compile` to compile Solidity contracts under `contracts/` and generate artifacts.
+2. `ts-node scripts/copy-abi.ts` to copy the generated JSON ABI + bytecode to `src/modules/blockchain/abis/EtibeCircle.json` so the backend can deploy circles on-chain.
+
 ## 🐳 Docker
 
 ```bash
