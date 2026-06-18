@@ -6,6 +6,7 @@ import {
   TransactionType,
   TransactionStatus,
 } from "../../../shared/enums";
+import { LedgerPosting, LedgerPostingSchema } from "./ledger-posting.schema";
 
 export interface TransactionDocument extends Document {
   _id: Types.ObjectId;
@@ -22,6 +23,7 @@ export interface TransactionDocument extends Document {
   baseAddress?: string;
   metadata?: Record<string, unknown>;
   failureReason?: string;
+  postings?: LedgerPosting[];
   confirmedAt?: Date;
   deletedAt?: Date;
   isDeleted: boolean;
@@ -128,6 +130,12 @@ export class Transaction {
     trim: true,
   })
   failureReason?: string;
+
+  @Prop({
+    type: [LedgerPostingSchema],
+    default: [],
+  })
+  postings?: LedgerPosting[];
 
   @Prop({
     index: true,

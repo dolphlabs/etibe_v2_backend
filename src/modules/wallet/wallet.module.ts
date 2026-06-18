@@ -6,18 +6,21 @@ import { ConfigModule, ConfigService } from "@nestjs/config";
 import { User, UserSchema } from "../users/schemas/user.schema";
 import { WalletController } from "./controllers/wallet.controller";
 import { WalletService } from "./services/wallet.service";
+import { FiatWalletService } from "./services/fiat-wallet.service";
 import { WithdrawalProcessor } from "./processors/withdrawal.processor";
 import { BlockchainModule } from "../blockchain";
 import { AuthModule } from "../auth";
 import { CirclesModule } from "../circles";
 import { WITHDRAWAL_QUEUE_NAME } from "./constants/withdrawal.constants";
 import { Transaction, TransactionSchema } from "@modules/transactions";
+import { FiatWallet, FiatWalletSchema } from "./schemas/fiat-wallet.schema";
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },
       { name: Transaction.name, schema: TransactionSchema },
+      { name: FiatWallet.name, schema: FiatWalletSchema },
     ]),
     BullModule.registerQueueAsync({
       name: WITHDRAWAL_QUEUE_NAME,
@@ -48,7 +51,7 @@ import { Transaction, TransactionSchema } from "@modules/transactions";
     forwardRef(() => CirclesModule),
   ],
   controllers: [WalletController],
-  providers: [WalletService, WithdrawalProcessor],
-  exports: [WalletService],
+  providers: [WalletService, FiatWalletService, WithdrawalProcessor],
+  exports: [WalletService, FiatWalletService],
 })
 export class WalletModule {}
