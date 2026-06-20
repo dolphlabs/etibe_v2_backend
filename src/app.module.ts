@@ -21,6 +21,8 @@ import {
   vaultConfig,
   cloudinaryConfig,
   baseConfig,
+  paycrestConfig,
+  nombaConfig,
 } from "./config";
 import {
   GlobalExceptionFilter,
@@ -39,6 +41,8 @@ import { WalletModule } from "./modules/wallet";
 import { UtilitiesModule } from "./modules/utilities";
 import { TransactionsModule } from "./modules/transactions";
 import { NotificationsModule } from "./modules/notifications";
+import { FiatRampModule } from "./modules/fiat-ramp";
+import { WebhooksModule } from "./modules/webhooks";
 
 @Module({
   imports: [
@@ -57,6 +61,8 @@ import { NotificationsModule } from "./modules/notifications";
         vaultConfig,
         cloudinaryConfig,
         baseConfig,
+        nombaConfig,
+        paycrestConfig,
       ],
       envFilePath: [".env.local", ".env"],
       expandVariables: true,
@@ -160,6 +166,8 @@ import { NotificationsModule } from "./modules/notifications";
     UtilitiesModule,
     TransactionsModule,
     NotificationsModule,
+    FiatRampModule,
+    WebhooksModule,
   ],
   providers: [
     {

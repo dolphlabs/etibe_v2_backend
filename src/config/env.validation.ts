@@ -6,6 +6,7 @@ import {
   Min,
   Max,
   validateSync,
+  isString,
 } from "class-validator";
 import { plainToInstance, Transform } from "class-transformer";
 
@@ -92,6 +93,38 @@ export class EnvironmentVariables {
   @IsOptional()
   @IsString()
   BASE_PAYOUT_CONTRACT_ADDRESS?: string;
+
+  @IsOptional()
+  @IsString()
+  NOMBA_API_URL?: string;
+
+  @IsOptional()
+  @IsString()
+  NOMBA_CLIENT_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  NOMBA_CLIENT_SECRET?: string;
+
+  @IsOptional()
+  @IsString()
+  NOMBA_ACOUNT_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  NOMBA_WEBHOOK_SECRET?: string;
+
+  @IsOptional()
+  @IsString()
+  PAYCREST_API_URL?: string;
+
+  @IsOptional()
+  @IsString()
+  PAYCREST_API_KEY?: string;
+
+  @IsOptional()
+  @IsString()
+  PAYCREST_PARTNER_ID?: string;
 }
 
 export function validate(

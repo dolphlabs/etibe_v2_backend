@@ -59,6 +59,7 @@ export interface UserDocument extends Document {
   baseEncryptedPrivateKey?: EncryptedKey;
   preferredChain?: string;
   walletBalance?: WalletBalance;
+  bankDetails?: BankDetail[];
   isActive: boolean;
   isVerified: boolean;
   isEmailVerified: boolean;
@@ -90,6 +91,38 @@ export interface UserDocument extends Document {
     virtuals: true,
   },
 })
+@Schema({ _id: false })
+export class BankDetail {
+  @Prop({
+    required: true,
+    trim: true,
+  })
+  institutionCode!: string;
+
+  @Prop({
+    required: true,
+    trim: true,
+  })
+  bankName?: string;
+
+  @Prop({
+    required: true,
+    trim: true,
+  })
+  accountNumber!: string;
+
+  @Prop({
+    required: true,
+    trim: true,
+  })
+  accountName!: string;
+
+  @Prop({ default: false })
+  isVerified!: boolean;
+}
+
+const BankDetailSchema = SchemaFactory.createForClass(BankDetail);
+
 export class User {
   @Prop({
     required: true,
@@ -195,6 +228,9 @@ export class User {
     default: () => ({ NEAR: "0", ETH: "0", USDT: "0", USDC: "0", CNGN: "0" }),
   })
   walletBalance?: WalletBalance;
+
+  @Prop({ type: [BankDetailSchema], default: [] })
+  bankDetails?: BankDetail[];
 
   @Prop({
     default: true,

@@ -157,24 +157,32 @@ export class FiatWalletService {
             `Updating user ${targetUserId} fiat wallet balance by ${postingAmount}`,
           );
 
-          const updatedWallet = await this.fiatWalletModel.findOneAndUpdate(
+          // NOTE: MongoDB $inc does not support Decimal128 fields.
+          // We use findOne + arithmetic + save to correctly update the balance.
+          const walletToUpdate = await this.fiatWalletModel.findOne(
             { userId: new Types.ObjectId(targetUserId), currency },
-            { $inc: { balance: postingAmount } },
-            { session, new: true },
+            null,
+            { session },
           );
 
-          if (!updatedWallet) {
+          if (!walletToUpdate) {
             throw new BadRequestException(
               `Fiat wallet for user ${targetUserId} not found during balance update`,
             );
           }
 
+          const currentBalance = parseFloat(walletToUpdate.balance || "0");
+          const newBalance = currentBalance + postingAmount;
+
           // Double check balance is not negative
-          if (parseFloat(updatedWallet.balance) < 0) {
+          if (newBalance < 0) {
             throw new BadRequestException(
               `Insufficient balance in fiat wallet for user ${targetUserId}`,
             );
           }
+
+          walletToUpdate.balance = newBalance.toFixed(2);
+          await walletToUpdate.save({ session });
         }
       }
 
@@ -219,5 +227,15 @@ export class FiatWalletService {
         ).toFixed(2)}`,
       );
     }
+  }
+
+  /**
+   * Find a fiat wallet by the Nomba virtual account reference.
+   * Used in the Nomba webhook handler to resolve which user received a payment.
+   */
+  async findByAccountReference(accountReference: string): Promise<FiatWalletDocument | null> {
+    return this.fiatWalletModel.findOne({
+      "virtualAccount.accountReference": accountReference,
+    });
   }
 }

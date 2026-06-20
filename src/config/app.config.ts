@@ -100,3 +100,19 @@ export const baseConfig = registerAs("base", () => ({
       ? "https://basescan.org"
       : "https://sepolia.basescan.org",
 }));
+
+export const nombaConfig = registerAs("nomba", ()=> ({
+  apiUrl: process.env.NOMBA_API_URL || "https://sandboxapi.nomba.com",
+  clientId: process.env.NOMBA_CLIENT_ID,
+  clientSecret: process.env.NOMBA_CLIENT_SECRET,
+  accountId: process.env.NOMBA_ACCOUNT_ID,
+  webhookSecret: process.env.NOMBA_WEBHOOK_SECRET,
+}));
+
+export const paycrestConfig = registerAs("paycrest", ()=> ({
+  apiUrl: process.env.PAYCREST_API_URL || "https://api.paycrest.io/v2",
+  apiKey: process.env.PAYCREST_API_KEY,
+  partnerId: process.env.PAYCREST_PARTNER_ID,
+
+}));
+

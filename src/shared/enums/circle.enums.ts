@@ -47,6 +47,10 @@ export enum TransactionType {
   PENALTY = "PENALTY",
   REFUND = "REFUND",
   JOINED_CHANNEL = "JOINED_CHANNEL",
+  //
+  FIAT_DEPOSIT = "FIAT_DEPOSIT",
+  FIAT_WITHDRAWAL = "FIAT_WITHDRAWAL",
+  NOMBA_PAYOUT = "NOMBA_PAYOUT",
 }
 
 export enum TransactionStatus {
@@ -55,6 +59,11 @@ export enum TransactionStatus {
   FAILED = "FAILED",
   REVERSED = "REVERSED",
   COMPLETED = "COMPLETED",
+  //
+  SWAP_PENDING = "SWAP_PENDING",
+  SWAP_SETTLED = "SWAP_SETTLED",
+  PAYOUT_PENDING = "PAYOUT_PENDING",
+  EXPIRED = "EXPIRED",
 }
 
 export enum InvitationStatus {

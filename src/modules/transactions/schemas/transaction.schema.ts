@@ -29,6 +29,13 @@ export interface TransactionDocument extends Document {
   isDeleted: boolean;
   createdAt: Date;
   updatedAt: Date;
+  // Fiat ramp fields
+  nombaReference?: string;
+  paycrestOrderId?: string;
+  paycrestReceiveAddress?: string;
+  fiatAmount?: string;
+  fiatCurrency?: string;
+  exchangeRate?: number;
 }
 
 @Schema({
@@ -132,10 +139,31 @@ export class Transaction {
   failureReason?: string;
 
   @Prop({
+    trim: true,
+    index: true,
+  })
+  nombaReference?: string;
+
+  @Prop({
     type: [LedgerPostingSchema],
     default: [],
   })
   postings?: LedgerPosting[];
+
+  @Prop({ trim: true, index: true })
+  paycrestOrderId?: string;
+
+  @Prop({ trim: true })
+  paycrestReceiveAddress?: string;
+
+  @Prop({ type: Number })
+  exchangeRate?: number;
+
+  @Prop({ trim: true })
+  fiatAmount?: string;
+
+  @Prop({ default: "NGN", trim: true })
+  fiatCurrency?: string;
 
   @Prop({
     index: true,
