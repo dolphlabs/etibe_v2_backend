@@ -9,7 +9,7 @@ import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
 import { CACHE_MANAGER } from "@nestjs/cache-manager";
 import { Cache } from "cache-manager";
-import { EventEmitter2 } from "@nestjs/event-emitter";
+import { EventEmitter2, OnEvent } from "@nestjs/event-emitter";
 import { ConfigService } from "@nestjs/config";
 
 import { User, UserDocument } from "../../users/schemas/user.schema";
@@ -61,14 +61,171 @@ export class FiatRampService {
 
   /**
    * Get or lazily create the user's NGN fiat wallet.
-   * The wallet holds a Nomba virtual account (the deposit account number).
+   * On first call, a real Nomba virtual account is created so the user can
+   * deposit NGN by bank transfer (and the Nomba webhook can fire).
    */
   async getMyFiatWallet(userId: string) {
-    return this.fiatWalletService.getOrCreateFiatWallet(userId);
+    const existing = await this.fiatWalletService.findByUserId(userId);
+    if (existing) return existing;
+
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException("User not found");
+
+    // accountRef: 16-64 chars (Nomba constraint), unique per wallet
+    const accountRef = `ETIBE-VA-${new Types.ObjectId().toString().toUpperCase()}`;
+
+    // accountName: 8-64 chars (Nomba constraint)
+    const fullName = `${user.firstName || ""} ${user.lastName || ""}`.trim();
+    let accountName = `ETIBE/${(fullName || user.username || "CUSTOMER").toUpperCase()}`;
+    if (accountName.length < 8) accountName = `ETIBE/CUSTOMER`;
+    accountName = accountName.slice(0, 64);
+
+    const virtualAccount = await this.nombaService.createVirtualAccount({
+      accountRef,
+      accountName,
+    });
+
+    return this.fiatWalletService.createWallet(userId, virtualAccount);
   }
 
   async getMyFiatBalance(userId: string) {
     return { balance: await this.fiatWalletService.getFiatBalance(userId), currency: "NGN" };
+  }
+
+  // ── AUTO-CONVERSION: NGN → cNGN ─────────────────────────────────────────────
+
+  /**
+   * Fired by the Nomba webhook after a deposit is verified and the user's
+   * fiat balance credited. Converts the full deposit to cNGN automatically:
+   *
+   *   1. Create a Paycrest on-ramp order (NGN → cNGN to the user's baseAddress)
+   *   2. Pay NGN from our Nomba corporate balance into Paycrest's provider account
+   *   3. Paycrest swaps and delivers cNGN on Base
+   *   4. `payment_order.settled` webhook debits the user's NGN fiat balance
+   *
+   * Failures leave the user's NGN balance credited (money is safe) and mark
+   * the swap transaction FAILED for retry/manual review.
+   */
+  @OnEvent(FIAT_RAMP_EVENTS.DEPOSIT_CONFIRMED)
+  async handleDepositConfirmed(payload: {
+    userId: string;
+    ngnAmount: string;
+    nombaReference: string;
+  }) {
+    const { userId, ngnAmount, nombaReference } = payload || ({} as any);
+    if (!userId || !ngnAmount || !nombaReference) {
+      this.logger.warn(
+        "[AUTO-CONVERT] DEPOSIT_CONFIRMED payload incomplete — skipping conversion",
+      );
+      return;
+    }
+
+    try {
+      await this.convertDepositToCngn(userId, ngnAmount, nombaReference);
+    } catch (err: any) {
+      // Never let a conversion failure bubble into the webhook response path.
+      this.logger.error(
+        `[AUTO-CONVERT] Conversion failed for user=${userId}, ref=${nombaReference}: ${err.message}`,
+      );
+    }
+  }
+
+  private async convertDepositToCngn(
+    userId: string,
+    ngnAmount: string,
+    nombaReference: string,
+  ) {
+    // Idempotency: one swap per Nomba deposit (webhooks can be retried)
+    const existing = await this.transactionModel.findOne({
+      nombaReference,
+      type: TransactionType.FIAT_DEPOSIT,
+      paycrestOrderId: { $exists: true, $ne: null },
+    });
+    if (existing) {
+      this.logger.log(
+        `[AUTO-CONVERT] Swap already initiated for ref=${nombaReference} (tx=${existing._id}) — skipping`,
+      );
+      return;
+    }
+
+    const user = await this.userModel.findById(userId);
+    if (!user?.baseAddress) {
+      // No on-chain wallet to deliver to — leave NGN in the fiat wallet.
+      this.logger.warn(
+        `[AUTO-CONVERT] User ${userId} has no baseAddress — NGN stays in fiat wallet`,
+      );
+      return;
+    }
+
+    // Pending swap transaction; the Paycrest webhook resolves it by paycrestOrderId
+    const tx = await this.transactionModel.create({
+      type: TransactionType.FIAT_DEPOSIT,
+      status: TransactionStatus.SWAP_PENDING,
+      userId: new Types.ObjectId(userId),
+      amount: ngnAmount,
+      currency: "NGN",
+      fiatAmount: ngnAmount,
+      fiatCurrency: "NGN",
+      baseAddress: user.baseAddress,
+      nombaReference,
+      metadata: { autoConversion: true },
+    });
+
+    try {
+      // 1. Create the Paycrest on-ramp order
+      const order = await this.paycrestService.createOrder({
+        amount: ngnAmount,
+        source: { type: "fiat", currency: "NGN" },
+        destination: {
+          type: "crypto",
+          currency: "cNGN",
+          recipient: { address: user.baseAddress, network: "base" },
+        },
+        reference: tx._id.toString(),
+      });
+
+      await this.transactionModel.findByIdAndUpdate(tx._id, {
+        paycrestOrderId: order.id,
+        exchangeRate: order.rate ? parseFloat(order.rate) : undefined,
+      });
+
+      // 2. Fund the order: pay NGN into Paycrest's provider bank account
+      const pa = order.providerAccount || ({} as any);
+      if (!pa.accountIdentifier) {
+        throw new Error("Paycrest order has no providerAccount to fund");
+      }
+
+      const payout = await this.nombaService.sendPayout({
+        amount: parseFloat(pa.amountToTransfer || ngnAmount),
+        destinationBank: pa.institution || "",
+        destinationAccount: pa.accountIdentifier,
+        destinationAccountName: pa.accountName || "PAYCREST",
+        narration: `PAYCREST:${order.id}`,
+        reference: `${tx._id.toString()}-fund`,
+      });
+
+      await this.transactionModel.findByIdAndUpdate(tx._id, {
+        $set: {
+          "metadata.nombaPayoutReference": payout.reference,
+          "metadata.nombaPayoutStatus": payout.status,
+        },
+      });
+
+      this.logger.log(
+        `[AUTO-CONVERT] ✅ Order ${order.id} created & funded (₦${ngnAmount}) — awaiting Paycrest settlement, tx=${tx._id}`,
+      );
+    } catch (err: any) {
+      await this.transactionModel.findByIdAndUpdate(tx._id, {
+        status: TransactionStatus.FAILED,
+        failureReason: `Auto-conversion failed: ${err.message}`,
+      });
+      this.eventEmitter.emit(FIAT_RAMP_EVENTS.DEPOSIT_FAILED, {
+        userId,
+        transactionId: tx._id.toString(),
+        error: err.message,
+      });
+      throw err;
+    }
   }
 
   // ── BANK ACCOUNTS ─────────────────────────────────────────────────────────────
@@ -364,5 +521,63 @@ export class FiatRampService {
 
     // Valid — consume the OTP
     await this.cacheManager.del(cacheKey);
+  }
+
+  // ── NOMBA WEBHOOK (ON-RAMP) ────────────────────────────────────────────────
+  async handleNombaWebhook(payload: any, signature?: string) {
+    this.logger.log(`Received Nomba webhook: ${JSON.stringify(payload)}`);
+    
+    // In a real app, verify HMAC signature here using configService.get('nomba.clientSecret')
+
+    const { event, data } = payload;
+    if (event !== "transaction.success" && event !== "virtual_account.transaction.success") {
+      this.logger.log(`Ignoring unhandled Nomba event: ${event}`);
+      return;
+    }
+
+    const accountNumber = data.virtualAccount || data.accountNumber;
+    const amountStr = data.amount?.toString();
+    if (!accountNumber || !amountStr) return;
+
+    const amount = parseFloat(amountStr);
+
+    const wallet = await this.fiatWalletService.findByVirtualAccountNumber(accountNumber);
+    if (!wallet) {
+      this.logger.warn(`Received deposit for unknown virtual account: ${accountNumber}`);
+      return;
+    }
+
+    const userId = wallet.userId.toString();
+    
+    const txId = data.transactionReference || data.id;
+    const existingTx = await this.transactionModel.findOne({ reference: txId });
+    if (existingTx) {
+      this.logger.warn(`Nomba transaction ${txId} already processed.`);
+      return;
+    }
+
+    this.logger.log(`Processing NGN ${amount} deposit for user ${userId}`);
+
+    const transaction = await this.transactionModel.create({
+      userId: wallet.userId,
+      type: TransactionType.TOP_UP,
+      status: TransactionStatus.COMPLETED,
+      amount: amount.toString(),
+      currency: Currency.CNGN,
+      nombaReference: txId,
+      metadata: {
+        provider: "nomba",
+        senderName: data.senderName,
+      },
+    });
+
+    try {
+      this.logger.log(`Crediting ${amount} to user ${userId} fiat wallet...`);
+      wallet.balance = (parseFloat(wallet.balance) + amount).toString();
+      await wallet.save();
+      this.logger.log(`Successfully credited ${amount} NGN for user ${userId}.`);
+    } catch (e: any) {
+      this.logger.error(`Failed to credit fiat wallet for user ${userId}: ${e.message}`);
+    }
   }
 }

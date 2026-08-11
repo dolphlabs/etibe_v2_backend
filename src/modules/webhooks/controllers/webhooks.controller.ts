@@ -293,7 +293,7 @@ export class WebhooksController {
               { paycrestOrderId: data.id, swapSettledAt: new Date().toISOString() },
             );
 
-            this.eventEmitter.emit(FIAT_RAMP_EVENTS.DEPOSIT_CONFIRMED, {
+            this.eventEmitter.emit(FIAT_RAMP_EVENTS.DEPOSIT_SETTLED, {
               transactionId,
               userId,
             });
@@ -449,17 +449,32 @@ export class WebhooksController {
   ): boolean {
     if (!signature || !secret) return false;
     try {
-      const signedPayload = timestamp
-        ? `${timestamp}.${rawBody.toString("utf8")}`
-        : rawBody;
+      const requestPayload = JSON.parse(rawBody.toString("utf8"));
+      const data = requestPayload.data || {};
+      const merchant = data.merchant || {};
+      const transaction = data.transaction || {};
+
+      const eventType = requestPayload.event_type || "";
+      const requestId = requestPayload.requestId || "";
+      const userId = merchant.userId || "";
+      const walletId = merchant.walletId || "";
+      const transactionId = transaction.transactionId || "";
+      const transactionType = transaction.type || "";
+      const transactionTime = transaction.time || "";
+      let transactionResponseCode = transaction.responseCode || "";
+      if (transactionResponseCode === "null") {
+        transactionResponseCode = "";
+      }
+
+      const hashingPayload = `${eventType}:${requestId}:${userId}:${walletId}:${transactionId}:${transactionType}:${transactionTime}:${transactionResponseCode}:${timestamp}`;
+
       const computed = createHmac("sha256", secret)
-        .update(signedPayload)
-        .digest("hex")
-        .toLowerCase();
-      const sig = signature.toLowerCase().trim();
-      if (computed.length !== sig.length) return false;
-      return timingSafeEqual(Buffer.from(computed, "utf8"), Buffer.from(sig, "utf8"));
-    } catch {
+        .update(hashingPayload)
+        .digest("base64");
+        
+      return computed === signature;
+    } catch (ex: any) {
+      this.logger.error(`Error verifying Nomba signature: ${ex.message}`);
       return false;
     }
   }

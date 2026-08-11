@@ -74,23 +74,6 @@ export interface UserDocument extends Document {
   resetPasswordExpiresAt?: Date;
 }
 
-@Schema({
-  collection: COLLECTION_NAMES.USERS,
-  timestamps: true,
-  toJSON: {
-    virtuals: true,
-    transform: (_doc, ret: Record<string, unknown>) => {
-      delete ret.password;
-      delete ret.nearEncryptedPrivateKey;
-      delete ret.baseEncryptedPrivateKey;
-      delete ret.__v;
-      return ret;
-    },
-  },
-  toObject: {
-    virtuals: true,
-  },
-})
 @Schema({ _id: false })
 export class BankDetail {
   @Prop({
@@ -123,6 +106,23 @@ export class BankDetail {
 
 const BankDetailSchema = SchemaFactory.createForClass(BankDetail);
 
+@Schema({
+  collection: COLLECTION_NAMES.USERS,
+  timestamps: true,
+  toJSON: {
+    virtuals: true,
+    transform: (_doc, ret: Record<string, unknown>) => {
+      delete ret.password;
+      delete ret.nearEncryptedPrivateKey;
+      delete ret.baseEncryptedPrivateKey;
+      delete ret.__v;
+      return ret;
+    },
+  },
+  toObject: {
+    virtuals: true,
+  },
+})
 export class User {
   @Prop({
     required: true,

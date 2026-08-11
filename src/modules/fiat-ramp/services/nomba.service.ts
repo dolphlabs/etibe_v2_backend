@@ -18,7 +18,7 @@ export class NombaService {
   ) {
     this.apiUrl = this.configService.get<string>(
       "nomba.apiUrl",
-      "https://sandboxapi.nomba.com",
+      "https://sandbox.nomba.com",
     );
     this.clientId = this.configService.get<string>("nomba.clientId", "");
     this.clientSecret = this.configService.get<string>(
@@ -36,9 +36,12 @@ export class NombaService {
     const cached = await this.cacheManager.get<string>(NOMBA_TOKEN_CACHE_KEY);
     if (cached) return cached;
 
-    const response = await fetch(`${this.apiUrl}/auth/token/issue`, {
+    const response = await fetch(`${this.apiUrl}/v1/auth/token/issue`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        accountId: this.accountId, // required header per Nomba API
+      },
       body: JSON.stringify({
         grant_type: "client_credentials",
         client_id: this.clientId,
@@ -49,13 +52,25 @@ export class NombaService {
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
       throw new Error(
-        `Nomba auth failed: ${err.message || response.statusText}`,
+        `Nomba auth failed (${response.status}): ${err.description || err.message || response.statusText}`,
       );
     }
 
     const json = await response.json();
-    const token = json.access_token;
-    const ttlMs = (json.expires_in - 60) * 1000; // 60s safety buffer
+    // Nomba wraps the token: { code, description, data: { access_token, expiresAt } }
+    const token: string | undefined = json.data?.access_token;
+    if (!token) {
+      throw new Error(
+        `Nomba auth response missing access_token (code: ${json.code}, description: ${json.description})`,
+      );
+    }
+
+    // expiresAt is an ISO timestamp; cache with a 60s safety buffer
+    const expiresAtMs = json.data?.expiresAt ? Date.parse(json.data.expiresAt) : NaN;
+    const ttlMs = Number.isFinite(expiresAtMs)
+      ? Math.max(expiresAtMs - Date.now() - 60_000, 60_000)
+      : 20 * 60_000; // fallback: 20 minutes
+
     await this.cacheManager.set(NOMBA_TOKEN_CACHE_KEY, token, ttlMs);
     this.logger.log("Nomba token refreshed");
     return token;
@@ -67,6 +82,65 @@ export class NombaService {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       accountId: this.accountId,
+    };
+  }
+
+  /**
+   * Create a real virtual account for a user.
+   * POST /v1/accounts/virtual (per developer.nomba.com)
+   */
+  async createVirtualAccount(params: {
+    accountRef: string; // 16-64 chars, unique per wallet
+    accountName: string; // 8-64 chars
+    bvn?: string;
+    expiryDate?: string; // "YYYY-MM-DD HH:MM:SS"
+  }): Promise<{
+    accountReference: string;
+    bankName: string;
+    accountNumber: string;
+    accountName: string;
+  }> {
+    const headers = await this.authedHeaders();
+
+    const response = await fetch(`${this.apiUrl}/v1/accounts/virtual`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        accountRef: params.accountRef,
+        accountName: params.accountName,
+        ...(params.bvn ? { bvn: params.bvn } : {}),
+        ...(params.expiryDate ? { expiryDate: params.expiryDate } : {}),
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      this.logger.error(
+        `Nomba virtual account creation failed (${response.status}): ${JSON.stringify(err)}`,
+      );
+      throw new Error(
+        `Nomba virtual account creation failed: ${err.description || err.message || response.statusText}`,
+      );
+    }
+
+    const json = await response.json();
+    const data = json.data;
+
+    if (!data?.bankAccountNumber) {
+      throw new Error(
+        "Nomba virtual account response missing bankAccountNumber",
+      );
+    }
+
+    this.logger.log(
+      `Nomba virtual account created: ${data.bankName} ${data.bankAccountNumber} (ref: ${data.accountRef})`,
+    );
+
+    return {
+      accountReference: data.accountRef,
+      bankName: data.bankName,
+      accountNumber: data.bankAccountNumber,
+      accountName: data.bankAccountName || params.accountName,
     };
   }
 
@@ -84,7 +158,7 @@ export class NombaService {
   }> {
     const headers = await this.authedHeaders();
     const response = await fetch(
-      `${this.apiUrl}/transactions/accounts/single?transactionId=${transactionReference}`,
+      `${this.apiUrl}/v1/transactions/accounts/single?transactionId=${transactionReference}`,
       { headers },
     );
 
@@ -138,7 +212,7 @@ export class NombaService {
       `Nomba payout: ₦${params.amount} to ${params.destinationAccount}, ref:${params.reference}`,
     );
 
-    const response = await fetch(`${this.apiUrl}/accounts/transfer`, {
+    const response = await fetch(`${this.apiUrl}/v1/accounts/transfer`, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),

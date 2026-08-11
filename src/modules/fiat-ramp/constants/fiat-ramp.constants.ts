@@ -14,6 +14,7 @@ export const LEDGER_ACCOUNTS = {
 
 export const FIAT_RAMP_EVENTS = {
   DEPOSIT_CONFIRMED: "fiat_ramp.deposit.confirmed",
+  DEPOSIT_SETTLED: "fiat_ramp.deposit.settled", // cNGN delivered on-chain
   DEPOSIT_FAILED: "fiat_ramp.deposit.failed",
   WITHDRAWAL_CONFIRMED: "fiat_ramp.withdrawal.confirmed",
   WITHDRAWAL_FAILED: "fiat_ramp.withdrawal.failed",

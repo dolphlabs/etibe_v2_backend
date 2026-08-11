@@ -29,6 +29,7 @@ async function bootstrap(): Promise<void> {
     fastifyAdapter,
     {
       bufferLogs: true,
+      rawBody: true,
     },
   );
 
@@ -46,20 +47,7 @@ async function bootstrap(): Promise<void> {
     },
   });
 
-  fastifyAdapter
-    .getInstance()
-    .addContentTypeParser(
-      "application/json",
-      { parseAs: "buffer" },
-      function (req: any, body: Buffer, done: any) {
-        req.rawBody = body; // stored for HMAC check
-        try {
-          done(null, JSON.parse(body.toString("utf8")));
-        } catch (e) {
-          done(e, undefined);
-        }
-      },
-    );
+
 
   await app.register(multipart, {
     limits: {

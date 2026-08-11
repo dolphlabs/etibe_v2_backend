@@ -1,0 +1,292 @@
+{
+	"info": {
+		"_postman_id": "1c828ab9-4f76-4a92-8072-04dbd1a8c028",
+		"name": "Etibé V2 API",
+		"description": "Enterprise Grade API for Etibé Application",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "User Login",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"yourpassword\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/login",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"login"
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Fiat Ramp",
+			"item": [
+				{
+					"name": "Get Fiat Wallet",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/fiat/wallet",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"fiat",
+								"wallet"
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Fiat Balance",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/fiat/balance",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"fiat",
+								"balance"
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Supported Banks",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/fiat/banks",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"fiat",
+								"banks"
+							]
+						}
+					}
+				},
+				{
+					"name": "Add Bank Account",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"institutionCode\": \"044\", \n  \"accountNumber\": \"0000000000\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/fiat/bank-accounts",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"fiat",
+								"bank-accounts"
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Saved Bank Accounts",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/fiat/bank-accounts",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"fiat",
+								"bank-accounts"
+							]
+						}
+					}
+				},
+				{
+					"name": "Get On-Ramp Quote",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 5000\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/fiat/deposit/quote",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"fiat",
+								"deposit",
+								"quote"
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Off-Ramp Quote",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 5\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/fiat/withdraw/quote",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"fiat",
+								"withdraw",
+								"quote"
+							]
+						}
+					}
+				},
+				{
+					"name": "Request Withdrawal OTP",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/fiat/withdraw/request-otp",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"fiat",
+								"withdraw",
+								"request-otp"
+							]
+						}
+					}
+				},
+				{
+					"name": "Initiate Withdrawal",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"cNgnAmount\": 5,\n  \"institutionCode\": \"044\",\n  \"accountNumber\": \"0000000000\",\n  \"accountName\": \"TEST ACCOUNT NAME\",\n  \"otp\": \"ENTER_OTP_HERE\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/fiat/withdraw/initiate",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"fiat",
+								"withdraw",
+								"initiate"
+							]
+						}
+					}
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:3000/api/v1",
+			"type": "string"
+		},
+		{
+			"key": "authToken",
+			"value": "YOUR_JWT_TOKEN_HERE",
+			"type": "string"
+		}
+	]
+}

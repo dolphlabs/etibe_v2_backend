@@ -32,51 +32,52 @@ export class FiatWalletService {
   ) {}
 
   /**
-   * Gets a user's fiat wallet. If it doesn't exist, creates one with a mock
-   * Nomba virtual account setup as a base for onboarding/on-ramp.
+   * Finds a user's NGN fiat wallet, or null if none exists yet.
    */
-  async getOrCreateFiatWallet(userId: string): Promise<FiatWalletDocument> {
+  async findByUserId(userId: string): Promise<FiatWalletDocument | null> {
+    return this.fiatWalletModel.findOne({
+      userId: new Types.ObjectId(userId),
+      currency: "NGN",
+    });
+  }
+
+  /**
+   * Creates the user's NGN fiat wallet with a real Nomba virtual account.
+   * Virtual account creation is orchestrated by FiatRampService (which owns
+   * NombaService); this method only persists the result.
+   */
+  async createWallet(
+    userId: string,
+    virtualAccount: {
+      accountReference: string;
+      bankName: string;
+      accountNumber: string;
+      accountName: string;
+    },
+  ): Promise<FiatWalletDocument> {
     const user = await this.userModel.findById(userId);
     if (!user) {
       throw new NotFoundException("User not found");
     }
 
-    let wallet = await this.fiatWalletModel.findOne({
-      userId: new Types.ObjectId(userId),
-      currency: "NGN",
-    });
-
-    if (!wallet) {
-      this.logger.log(`Creating fiat wallet for user ${userId}`);
-
-      // Enforce basic KYC information for Nomba integration mapping
-      if (!user.phone) {
-        this.logger.warn(
-          `User ${userId} does not have a phone number. Generating a default placeholder phone for Nomba sandbox.`,
-        );
-      }
-
-      // Generate a mock Nomba Virtual Account as a base for the onboarding flow
-      const accountReference = `REF-${new Types.ObjectId().toString().toUpperCase()}`;
-      const mockVirtualAccount = {
-        accountReference,
-        bankName: "Wema Bank",
-        accountNumber: Math.floor(1000000000 + Math.random() * 9000000000).toString(),
-        accountName: `ETIBE/${user.firstName.toUpperCase()} ${user.lastName.toUpperCase()}`,
-      };
-
-      wallet = await this.fiatWalletModel.create({
-        userId: new Types.ObjectId(userId),
-        currency: "NGN",
-        balance: "0.00",
-        virtualAccount: mockVirtualAccount,
-        status: "ACTIVE",
-      });
-
-      this.logger.log(
-        `Fiat wallet created for user ${userId} with virtual account ${mockVirtualAccount.accountNumber}`,
+    const existing = await this.findByUserId(userId);
+    if (existing) {
+      throw new BadRequestException(
+        `User ${userId} already has an NGN fiat wallet`,
       );
     }
+
+    const wallet = await this.fiatWalletModel.create({
+      userId: new Types.ObjectId(userId),
+      currency: "NGN",
+      balance: "0.00",
+      virtualAccount,
+      status: "ACTIVE",
+    });
+
+    this.logger.log(
+      `Fiat wallet created for user ${userId} with virtual account ${virtualAccount.accountNumber} (${virtualAccount.bankName})`,
+    );
 
     return wallet;
   }
@@ -151,10 +152,15 @@ export class FiatWalletService {
           posting.accountRef.startsWith("user:fiat_wallet:")
         ) {
           const targetUserId = posting.accountRef.split(":")[2];
-          const postingAmount = parseFloat(posting.amount);
+
+          // For LIABILITY accounts the user's cached balance moves OPPOSITE
+          // to the posting sign: a CREDIT (-) means we owe the user more
+          // (deposit → balance up), a DEBIT (+) means we owe less
+          // (withdrawal/conversion → balance down).
+          const balanceDelta = -parseFloat(posting.amount);
 
           this.logger.log(
-            `Updating user ${targetUserId} fiat wallet balance by ${postingAmount}`,
+            `Updating user ${targetUserId} fiat wallet balance by ${balanceDelta}`,
           );
 
           // NOTE: MongoDB $inc does not support Decimal128 fields.
@@ -172,7 +178,7 @@ export class FiatWalletService {
           }
 
           const currentBalance = parseFloat(walletToUpdate.balance || "0");
-          const newBalance = currentBalance + postingAmount;
+          const newBalance = currentBalance + balanceDelta;
 
           // Double check balance is not negative
           if (newBalance < 0) {
@@ -237,5 +243,9 @@ export class FiatWalletService {
     return this.fiatWalletModel.findOne({
       "virtualAccount.accountReference": accountReference,
     });
+  }
+
+  async findByVirtualAccountNumber(accountNumber: string): Promise<FiatWalletDocument | null> {
+    return this.fiatWalletModel.findOne({ "virtualAccount.accountNumber": accountNumber });
   }
 }

@@ -102,6 +102,11 @@ export class MailService {
     try {
       await this.storeOtp(email, otp, deviceId);
 
+      // In development, always log the OTP to the console so the developer can see it!
+      if (this.configService.get("NODE_ENV") !== "production") {
+        this.logger.log(`\n==============================================\n🔑 DEVELOPMENT OTP FOR ${email}: ${otp}\n==============================================\n`);
+      }
+
       const { data, error } = await this.resend.emails.send({
         from: `${this.fromName} <${this.fromEmail}>`,
         to: email,

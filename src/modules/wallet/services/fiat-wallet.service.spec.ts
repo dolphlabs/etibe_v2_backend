@@ -70,35 +70,68 @@ describe("FiatWalletService", () => {
     expect(service).toBeDefined();
   });
 
-  describe("getOrCreateFiatWallet", () => {
+  describe("findByUserId", () => {
     it("should return existing fiat wallet", async () => {
       const userId = new Types.ObjectId().toString();
       const mockWallet = { userId: new Types.ObjectId(userId), currency: "NGN", balance: "5000.00" };
-      
-      mockUserModel.findById.mockResolvedValue({ _id: userId, firstName: "John", lastName: "Doe" });
+
       mockFiatWalletModel.findOne.mockResolvedValue(mockWallet);
 
-      const result = await service.getOrCreateFiatWallet(userId);
+      const result = await service.findByUserId(userId);
       expect(result).toEqual(mockWallet);
       expect(mockFiatWalletModel.findOne).toHaveBeenCalledWith({
         userId: new Types.ObjectId(userId),
         currency: "NGN",
       });
-      expect(mockFiatWalletModel.create).not.toHaveBeenCalled();
     });
 
-    it("should create new fiat wallet with virtual accounts if not exists", async () => {
+    it("should return null when no wallet exists", async () => {
+      mockFiatWalletModel.findOne.mockResolvedValue(null);
+      const result = await service.findByUserId(new Types.ObjectId().toString());
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("createWallet", () => {
+    const virtualAccount = {
+      accountReference: "ETIBE-VA-TESTREF12345678",
+      bankName: "Wema Bank",
+      accountNumber: "1234567890",
+      accountName: "ETIBE/JOHN DOE",
+    };
+
+    it("should create a wallet with the provided virtual account", async () => {
       const userId = new Types.ObjectId().toString();
-      const mockUser = { _id: userId, firstName: "John", lastName: "Doe", phone: "123456" };
-      const mockWallet = { userId: new Types.ObjectId(userId), currency: "NGN", balance: "0.00" };
-      
+      const mockUser = { _id: userId, firstName: "John", lastName: "Doe" };
+      const mockWallet = { userId: new Types.ObjectId(userId), currency: "NGN", balance: "0.00", virtualAccount };
+
       mockUserModel.findById.mockResolvedValue(mockUser);
       mockFiatWalletModel.findOne.mockResolvedValue(null);
       mockFiatWalletModel.create.mockResolvedValue(mockWallet);
 
-      const result = await service.getOrCreateFiatWallet(userId);
-      expect(result).toBeDefined();
-      expect(mockFiatWalletModel.create).toHaveBeenCalled();
+      const result = await service.createWallet(userId, virtualAccount);
+      expect(result).toEqual(mockWallet);
+      expect(mockFiatWalletModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({ currency: "NGN", balance: "0.00", virtualAccount }),
+      );
+    });
+
+    it("should throw if the user already has a wallet", async () => {
+      const userId = new Types.ObjectId().toString();
+      mockUserModel.findById.mockResolvedValue({ _id: userId });
+      mockFiatWalletModel.findOne.mockResolvedValue({ currency: "NGN" });
+
+      await expect(service.createWallet(userId, virtualAccount)).rejects.toThrow(
+        "already has an NGN fiat wallet",
+      );
+      expect(mockFiatWalletModel.create).not.toHaveBeenCalled();
+    });
+
+    it("should throw if the user does not exist", async () => {
+      mockUserModel.findById.mockResolvedValue(null);
+      await expect(
+        service.createWallet(new Types.ObjectId().toString(), virtualAccount),
+      ).rejects.toThrow("User not found");
     });
   });
 
@@ -107,9 +140,12 @@ describe("FiatWalletService", () => {
       const userId = new Types.ObjectId().toString();
       const mockTx = { _id: new Types.ObjectId() };
       
+      const mockWalletDoc = { balance: "500.00", save: jest.fn().mockResolvedValue(true) };
       mockTransactionModel.create.mockResolvedValue([mockTx]);
-      mockFiatWalletModel.findOneAndUpdate.mockResolvedValue({ balance: "100.00" });
+      mockFiatWalletModel.findOne.mockResolvedValue(mockWalletDoc);
 
+      // Deposit: DEBIT (+) platform asset, CREDIT (-) user liability.
+      // The user's cached balance must INCREASE on a liability credit.
       const postings = [
         {
           accountType: LedgerAccountType.ASSET,
@@ -133,7 +169,8 @@ describe("FiatWalletService", () => {
 
       expect(result).toBeDefined();
       expect(mockSession.commitTransaction).toHaveBeenCalled();
-      expect(mockFiatWalletModel.findOneAndUpdate).toHaveBeenCalled();
+      expect(mockWalletDoc.save).toHaveBeenCalled();
+      expect(mockWalletDoc.balance).toBe("600.00");
     });
 
     it("should throw error and abort session when postings do not balance", async () => {

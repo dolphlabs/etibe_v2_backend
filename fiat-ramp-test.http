@@ -1,0 +1,98 @@
+### Etibé Fiat Ramp - Local Testing Environment
+#
+# Requirements:
+# 1. Install the "REST Client" extension in VS Code.
+# 2. Start the backend: `npm run dev`
+# 3. Start ngrok in a separate terminal: `npx ngrok http 3000`
+# 4. Fill in your Nomba test keys in the `.env` file.
+
+@baseUrl = http://localhost:3000/api/v1
+# Replace this with the token you get after logging in via your normal auth flow
+@authToken = YOUR_JWT_TOKEN_HERE
+
+### ------------------------------------------------------------------------
+### 1. GET FIAT WALLET & BALANCE
+### ------------------------------------------------------------------------
+
+### Get/Create My Fiat Wallet (this creates the Nomba virtual account placeholder)
+GET {{baseUrl}}/fiat/wallet
+Authorization: Bearer {{authToken}}
+
+### Get Fiat Balance
+GET {{baseUrl}}/fiat/balance
+Authorization: Bearer {{authToken}}
+
+### ------------------------------------------------------------------------
+### 2. BANK ACCOUNTS (OFF-RAMP DESTINATIONS)
+### ------------------------------------------------------------------------
+
+### Get Supported Banks
+GET {{baseUrl}}/fiat/banks
+Authorization: Bearer {{authToken}}
+
+### Add a Bank Account (Replace with valid Nigerian bank details)
+POST {{baseUrl}}/fiat/bank-accounts
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "institutionCode": "044", 
+  "accountNumber": "0000000000"
+}
+
+### Get Saved Bank Accounts
+GET {{baseUrl}}/fiat/bank-accounts
+Authorization: Bearer {{authToken}}
+
+### ------------------------------------------------------------------------
+### 3. ON-RAMP (NGN -> cNGN)
+### ------------------------------------------------------------------------
+
+### Get On-Ramp Quote (e.g., for 5000 NGN)
+POST {{baseUrl}}/fiat/deposit/quote
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "amount": 5000
+}
+
+### (The actual deposit is triggered when Nomba sends a webhook for funds received)
+
+### ------------------------------------------------------------------------
+### 4. OFF-RAMP (cNGN -> NGN)
+### ------------------------------------------------------------------------
+
+### Get Off-Ramp Quote (e.g., for 5 cNGN)
+POST {{baseUrl}}/fiat/withdraw/quote
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "amount": 5
+}
+
+### Request Withdrawal OTP (check your email or console logs for the OTP)
+POST {{baseUrl}}/fiat/withdraw/request-otp
+Authorization: Bearer {{authToken}}
+
+### Initiate Withdrawal
+# Note: Ensure you have NGN balance in your fiat wallet first
+POST {{baseUrl}}/fiat/withdraw/initiate
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "cNgnAmount": 5,
+  "institutionCode": "044",
+  "accountNumber": "0000000000",
+  "accountName": "TEST ACCOUNT NAME",
+  "otp": "ENTER_OTP_HERE"
+}
+
+### ------------------------------------------------------------------------
+### 5. WEBHOOK SIMULATION (FOR LOCAL TESTING WITHOUT NGROK)
+### ------------------------------------------------------------------------
+# To manually test the webhooks, you need the actual HMAC signature, 
+# which is difficult to mock manually. It is highly recommended to use 
+# ngrok and trigger real test payments from the Nomba/Paycrest sandboxes.
